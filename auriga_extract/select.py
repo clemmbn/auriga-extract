@@ -18,27 +18,18 @@ SELECT_ALL = {"all", "tout", "tous", "*"}
 SELECT_NONE = {"none", "aucun", "rien"}
 
 
-def parse_selection(text: str, count: int) -> list[int]:
+def _parse_indices(text: str, count: int) -> set[int]:
     """
-    Turn a user's selection string into zero-based indices.
+    Parse a comma/range list of 1-based indices, validated against count.
 
-    text: raw input, e.g. "1,3,5", "1-4, 7", "all", "none".
+    text: e.g. "1,3,5" or "1-4, 7" (already lowercased).
     count: how many items are on offer.
-    Returns sorted unique zero-based indices.
-    Raises ValueError with a user-facing message on anything unparseable or
-    out of range.
-
-    Ranges and commas are both supported because a year's timetable produces
-    long lists where "1-6" is much less error-prone than typing six numbers.
+    Returns a set of 1-based indices. Raises ValueError on anything
+    unparseable or out of range. Shared by plain selections and by the
+    exclusion list after "all !".
     """
-    cleaned = (text or "").strip().lower()
-    if not cleaned or cleaned in SELECT_NONE:
-        return []
-    if cleaned in SELECT_ALL:
-        return list(range(count))
-
     chosen: set[int] = set()
-    for piece in cleaned.replace(" ", ",").split(","):
+    for piece in text.replace(" ", ",").split(","):
         if not piece:
             continue
 
@@ -67,6 +58,43 @@ def parse_selection(text: str, count: int) -> list[int]:
             shown += f", ... ({len(out_of_range)} values)"
         raise ValueError(f"out of range (1-{count}): {shown}")
 
+    return chosen
+
+
+def parse_selection(text: str, count: int) -> list[int]:
+    """
+    Turn a user's selection string into zero-based indices.
+
+    text: raw input, e.g. "1,3,5", "1-4, 7", "all", "all !3,5", "none".
+    count: how many items are on offer.
+    Returns sorted unique zero-based indices.
+    Raises ValueError with a user-facing message on anything unparseable or
+    out of range.
+
+    Ranges and commas are both supported because a year's timetable produces
+    long lists where "1-6" is much less error-prone than typing six numbers.
+    "all !<list>" selects everything except the given indices, for when most
+    of the timetable is wanted and only a few entries should be dropped.
+    """
+    cleaned = (text or "").strip().lower()
+    if not cleaned or cleaned in SELECT_NONE:
+        return []
+    if cleaned in SELECT_ALL:
+        return list(range(count))
+
+    if "!" in cleaned:
+        head, _, remainder = cleaned.partition("!")
+        if head.strip() not in SELECT_ALL:
+            raise ValueError(f"'{text}' is not a valid selection")
+        if not remainder.strip():
+            raise ValueError("'all !' needs numbers to exclude, e.g. 'all !3,5'")
+        excluded = _parse_indices(remainder, count)
+        picked = sorted(set(range(1, count + 1)) - excluded)
+        if not picked:
+            raise ValueError("excluding everything leaves nothing selected")
+        return sorted(n - 1 for n in picked)
+
+    chosen = _parse_indices(cleaned, count)
     return sorted(n - 1 for n in chosen)
 
 
