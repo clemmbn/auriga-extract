@@ -1,13 +1,13 @@
 """
-ICS generation layer: one .ics file per selected course.
+ICS generation layer: one combined .ics file for every selected course.
 
 Timezone handling is the part most likely to go subtly wrong, so it is worth
 being explicit. The API returns instants in UTC (`2026-09-17T06:30:00Z`), while
 the school thinks in Europe/Paris. We convert to Europe/Paris and emit local
-times with a TZID, bundling a real VTIMEZONE component covering the exported
-range. That is what makes the file self-contained and unambiguous across the
-March/October DST switches -- a TZID without a VTIMEZONE is technically invalid
-and some clients silently guess.
+times with a TZID, bundling a single real VTIMEZONE component covering every
+selected course's own date span. That is what makes the file self-contained
+and unambiguous across the March/October DST switches -- a TZID without a
+VTIMEZONE is technically invalid and some clients silently guess.
 
 UIDs are derived from the portal's own intervention id, so re-importing an
 updated export updates events in place instead of duplicating them.
@@ -15,8 +15,6 @@ updated export updates events in place instead of duplicating them.
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from icalendar import Calendar, Event, Timezone
 
+from .console import console
 from .courses import Course, caption
 
 SCHOOL_TZ = ZoneInfo("Europe/Paris")
@@ -33,9 +32,6 @@ TZID = "Europe/Paris"
 UID_DOMAIN = "auriga.isae-supaero"
 
 PRODID = "-//Auriga Extract//Timetable to ICS//FR"
-
-# Filesystem-hostile characters, plus anything non-printable.
-_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9._+-]+")
 
 
 def parse_instant(value: Optional[str]) -> Optional[datetime]:
@@ -60,22 +56,6 @@ def parse_instant(value: Optional[str]) -> Optional[datetime]:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
     return parsed.astimezone(SCHOOL_TZ)
-
-
-def sanitize_filename(name: str, fallback: str = "cours") -> str:
-    """
-    Turn a course code or title into a safe file stem.
-
-    name: the raw code or title.
-    fallback: used when nothing usable survives sanitizing.
-    Returns a trimmed, filesystem-safe stem (no extension), max 90 chars.
-    """
-    # Transliterate accents first (é -> e) instead of letting them be replaced
-    # by underscores, which turned "Présentation" into "Pr_sentation".
-    decomposed = unicodedata.normalize("NFKD", name or "")
-    ascii_only = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    cleaned = _UNSAFE_FILENAME.sub("_", ascii_only.strip()).strip("._")
-    return (cleaned[:90] or fallback)
 
 
 def _describe_occurrence(course: Course, intervention: dict[str, Any]) -> str:
@@ -149,39 +129,23 @@ def _summary_for(course: Course, intervention: dict[str, Any]) -> str:
     return f"{code} · {course.title}" if code else course.title
 
 
-def build_calendar(course: Course, stamp: Optional[datetime] = None) -> Calendar:
+def _add_course_events(calendar: Calendar, course: Course, dtstamp: datetime) -> None:
     """
-    Render one course as an icalendar Calendar.
+    Add every occurrence of one course as a VEVENT on an existing Calendar.
 
-    course: the course to export, with its occurrences.
-    stamp: DTSTAMP value; defaults to now (injectable for deterministic tests).
-    Returns a Calendar containing a VTIMEZONE plus one VEVENT per occurrence
-    that has a usable start and end.
+    calendar: the in-progress combined Calendar to append to.
+    course: the course whose occurrences become events.
+    dtstamp: DTSTAMP value shared by every event in this export run.
+    Side effect: mutates calendar. Skips occurrences with no usable
+    start/end instant, printing why.
     """
-    calendar = Calendar()
-    calendar.add("prodid", PRODID)
-    calendar.add("version", "2.0")
-    calendar.add("calscale", "GREGORIAN")
-    # Apple Calendar shows this as the imported calendar's name.
-    calendar.add("x-wr-calname", course.title)
-    calendar.add("x-wr-timezone", TZID)
-
-    starts = [parse_instant(i.get("startDateTime")) for i in course.occurrences]
-    starts = [s for s in starts if s]
-    if starts:
-        # Bound the VTIMEZONE to the data's own span (padded a year each way)
-        # rather than emitting decades of DST transitions.
-        first = min(starts).date() - timedelta(days=365)
-        last = max(starts).date() + timedelta(days=365)
-        calendar.add_component(Timezone.from_tzinfo(SCHOOL_TZ, TZID, first, last))
-
-    dtstamp = stamp or datetime.now(tz=ZoneInfo("UTC"))
-
     for intervention in course.occurrences:
         start = parse_instant(intervention.get("startDateTime"))
         end = parse_instant(intervention.get("endDateTime"))
         if not start or not end:
-            print(f"[ics] skipping session {intervention.get('id')}: unusable dates")
+            console.print(
+                f"[yellow][ics][/] skipping session {intervention.get('id')}: unusable dates"
+            )
             continue
 
         event = Event()
@@ -201,46 +165,66 @@ def build_calendar(course: Course, stamp: Optional[datetime] = None) -> Calendar
 
         calendar.add_component(event)
 
+
+def build_combined_calendar(
+    courses: list[Course], start: date, end: date, stamp: Optional[datetime] = None
+) -> Calendar:
+    """
+    Render every selected course into one icalendar Calendar.
+
+    courses: the selected courses, in the order they should be added.
+    start, end: the requested export range; used for the calendar's display
+    name and to pad the VTIMEZONE bounds if no occurrence has usable dates.
+    stamp: DTSTAMP value; defaults to now (injectable for deterministic tests).
+    Returns one Calendar containing a single VTIMEZONE plus one VEVENT per
+    occurrence, across all courses, that has a usable start and end.
+    """
+    calendar = Calendar()
+    calendar.add("prodid", PRODID)
+    calendar.add("version", "2.0")
+    calendar.add("calscale", "GREGORIAN")
+    # Apple Calendar shows this as the imported calendar's name.
+    calendar.add("x-wr-calname", f"ISAE-SUPAERO {start.isoformat()} → {end.isoformat()}")
+    calendar.add("x-wr-timezone", TZID)
+
+    all_starts = [
+        parsed
+        for course in courses
+        for parsed in (parse_instant(i.get("startDateTime")) for i in course.occurrences)
+        if parsed
+    ]
+    # Bound the VTIMEZONE to the data's own span (padded a year each way)
+    # rather than emitting decades of DST transitions. Fall back to the
+    # requested range if every occurrence turned out to be unusable.
+    tz_first = (min(all_starts).date() if all_starts else start) - timedelta(days=365)
+    tz_last = (max(all_starts).date() if all_starts else end) + timedelta(days=365)
+    calendar.add_component(Timezone.from_tzinfo(SCHOOL_TZ, TZID, tz_first, tz_last))
+
+    dtstamp = stamp or datetime.now(tz=ZoneInfo("UTC"))
+    for course in courses:
+        _add_course_events(calendar, course, dtstamp)
+
     return calendar
 
 
-def _unique_path(directory: Path, stem: str) -> Path:
+def write_calendar(courses: list[Course], out_root: Path, start: date, end: date) -> Path:
     """
-    Pick a non-colliding .ics path inside a directory.
-
-    Two description-grouped courses can sanitize to the same stem, so a numeric
-    suffix is appended rather than silently overwriting an earlier export.
-    """
-    candidate = directory / f"{stem}.ics"
-    counter = 2
-    while candidate.exists():
-        candidate = directory / f"{stem}-{counter}.ics"
-        counter += 1
-    return candidate
-
-
-def write_courses(courses: list[Course], out_root: Path, start: date, end: date) -> list[Path]:
-    """
-    Write one .ics per course into a per-run directory.
+    Write every selected course into one combined .ics file.
 
     courses: the selected courses.
-    out_root: parent output directory.
-    start, end: the requested range, used to name the run folder.
-    Returns the written paths. Side effects: creates directories, writes files,
-    prints progress.
+    out_root: directory the file is written into (created if missing).
+    start, end: the requested range, used for the filename and calendar name.
+    Returns the written path. Side effects: creates out_root, writes one
+    file, prints progress.
     """
-    run_dir = out_root / f"{start.isoformat()}_{end.isoformat()}"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[ics] writing to {run_dir}")
+    out_root.mkdir(parents=True, exist_ok=True)
+    path = out_root / f"auriga_{start.isoformat()}_{end.isoformat()}.ics"
+    calendar = build_combined_calendar(courses, start, end)
+    path.write_bytes(calendar.to_ical())
 
-    written: list[Path] = []
-    for course in courses:
-        # Unit code makes the best filename; description groups fall back to
-        # their title, which is all the identity they have.
-        stem = sanitize_filename(course.display_code if course.has_unit else course.title)
-        path = _unique_path(run_dir, stem)
-        path.write_bytes(build_calendar(course).to_ical())
-        written.append(path)
-        print(f"[ics] {path.name}  ({len(course.occurrences)} sessions)")
-
-    return written
+    total_sessions = sum(len(course.occurrences) for course in courses)
+    console.print(
+        f"[dim][ics][/] wrote [green]{path.name}[/] "
+        f"({len(courses)} course(s), {total_sessions} session(s))"
+    )
+    return path
