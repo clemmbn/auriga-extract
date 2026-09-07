@@ -226,7 +226,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         type=Path,
         default=None,
         metavar="DIR",
-        help="also record network traffic here (debugging)",
+        help=(
+            "record login/bootstrap network traffic here (debugging). Note the "
+            "timetable itself is fetched over plain HTTP, not by the browser, "
+            "so it does not appear here -- use auriga_extract.probe for that"
+        ),
     )
     # Superseded by --browser when Playwright was dropped. Kept as an accepted
     # no-op because earlier READMEs documented it, so people still have it in
