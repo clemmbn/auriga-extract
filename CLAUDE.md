@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Working end to end. `uv run python extract_schedule.py --start … --end …` opens a browser, waits for manual login, fetches the range, and writes one `.ics` per selected course.
+Working end to end. `uv run python extract_schedule.py --start … --end …` opens a browser, waits for manual login, fetches the range, and writes one combined `.ics` for all selected courses.
 
-Verified against a mock API replaying real captured payloads: 76 events → 23 courses → 23 files, all UIDs unique, every event round-tripping to the exact instant the API reported. Not yet run end to end against the live portal with a real login.
+Verified against a mock API replaying real captured payloads: 76 events → 23 courses grouped correctly, all UIDs unique, every event round-tripping to the exact instant the API reported. Combined single-file writing verified separately (see docs/superpowers/plans/2026-09-07-combined-export-and-rich-ui.md, Task 9). Not yet run end to end against the live portal with a real login.
 
 ## What this tool does (per INSTRUCTIONS.md)
 
-A Python CLI that logs into ISAE-SUPAERO's web-based timetable portal (an ADE Campus-style planning SPA), extracts class events over a user-specified date range via Playwright network interception, lets the user interactively pick which courses to keep, and generates one `.ics` file per selected course.
+A Python CLI that logs into ISAE-SUPAERO's web-based timetable portal (an ADE Campus-style planning SPA), extracts class events over a user-specified date range via Playwright network interception, lets the user interactively pick which courses to keep, and generates one combined `.ics` file for all selected courses.
 
 Key constraints from the brief:
 - The portal's API is protected by what appears to be a WAF/TLS-fingerprinting layer — raw `curl`/HTTP requests get rejected even with correct headers/cookies copied from DevTools. **All data collection must go through a real Playwright-driven browser**, not direct HTTP calls.
