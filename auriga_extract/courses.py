@@ -26,6 +26,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from .console import console
+
 # Marks a group built from a description rather than a unit code.
 NO_UNIT_PREFIX = "sans-code:"
 
@@ -210,8 +212,9 @@ def group_courses(interventions: list[dict[str, Any]]) -> list[Course]:
         course.occurrences.sort(key=lambda i: str(i.get("startDateTime") or ""))
 
     n_coded = sum(1 for c in courses if c.has_unit)
-    print(
-        f"[courses] {len(interventions)} events -> {len(courses)} groups "
+    console.print(
+        f"[cyan][courses][/] {len(interventions)} events -> "
+        f"[bold]{len(courses)}[/] groups "
         f"({n_coded} with a unit code, {len(courses) - n_coded} without)"
     )
     return courses
