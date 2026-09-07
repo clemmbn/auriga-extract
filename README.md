@@ -46,12 +46,10 @@ finish before the next one.
 
 4. **Quit Terminal completely** (`Cmd+Q`, not just close the window) and
    reopen it — this step is easy to skip but required.
-5. Paste, one line at a time:
+5. Paste this one line:
 
    ```bash
-   git clone https://github.com/clemmbn/auriga-extract.git
-   cd auriga-extract
-   pipx install .
+   pipx install git+https://github.com/clemmbn/auriga-extract.git
    ```
 
 6. Check it worked: paste `auriga-extract --help`. If you see a list of
@@ -75,12 +73,10 @@ finish before the next one.
 
 5. **Close the PowerShell window completely** and reopen it — this step is
    easy to skip but required.
-6. Paste, one line at a time:
+6. Paste this one line:
 
    ```bash
-   git clone https://github.com/clemmbn/auriga-extract.git
-   cd auriga-extract
-   pipx install .
+   pipx install git+https://github.com/clemmbn/auriga-extract.git
    ```
 
 7. Check it worked: paste `auriga-extract --help`. If you see a list of
@@ -95,40 +91,68 @@ you this tool.
 <details>
 <summary><strong>Using conda?</strong></summary>
 
-> **⚠️ Don't `pip install` or `conda install` this tool directly into a conda
-> environment.** Mixing conda and pip installs of the same packages in one
-> environment can leave you with two incompatible versions fighting over the
-> same files (conflicting binaries, broken imports) — annoying to debug and
-> easy to avoid.
+**Install it with pipx, using conda's own Python.** You don't need a separate
+Python — conda's is fine, and pipx builds the tool a private environment that no
+conda env ever touches.
 
-Use **pipx** for this tool even if you have conda installed — pipx creates
-its own isolated environment, completely separate from any conda env, so
-there's no interaction at all:
+> **⚠️ What not to do:** don't `conda install` or `pip install` this tool into a
+> conda env. Conda and pip each keep their own record of what's installed and
+> neither sees the other's, so they can end up overwriting each other's files —
+> broken imports that are painful to diagnose. pipx sidesteps this entirely.
 
-```bash
-conda deactivate          # make sure no conda env is active
-python -m pip install --user pipx
-python -m pipx ensurepath
-git clone https://github.com/clemmbn/auriga-extract.git
-cd auriga-extract
-pipx install .
-```
+Install from the **`base`** environment, not from a project env you created for
+this. The tool keeps using whichever Python built it, and `base` only goes away
+if you uninstall conda — a project env is one `conda env remove` away from
+breaking the command.
 
-`auriga-extract` is then available from any terminal, conda-activated or
-not.
+1. Open your terminal:
+   - **macOS** — **Terminal** (`Cmd+Space`, type `Terminal`, Enter).
+   - **Windows** — **Anaconda Prompt** (Windows key, type `Anaconda`, Enter).
+     Use this one, not plain PowerShell: it's where conda's `python` exists.
 
-If you'd rather install it inside a conda env anyway (e.g. to match a course
-setup), keep it consistent: create a dedicated env, then install *only* with
-`pip` inside it — never both:
+2. Switch to the base environment — your prompt should now start with `(base)`:
 
-```bash
-conda create -n auriga python=3.11 -y
-conda activate auriga
-pip install -e .
-```
+   ```bash
+   conda activate base
+   ```
 
-You'll then need `conda activate auriga` every time before running
-`auriga-extract`, which is the main reason pipx is recommended above.
+3. Install pipx:
+
+   ```bash
+   python -m pip install --user pipx
+   python -m pipx ensurepath
+   ```
+
+4. **Restart your terminal completely** — `Cmd+Q` on macOS, close the window on
+   Windows. Easy to skip, but required: `ensurepath` changes your PATH and only
+   a freshly opened terminal picks that up.
+
+5. Reopen the terminal and install the tool:
+
+   ```bash
+   conda activate base
+   pipx install git+https://github.com/clemmbn/auriga-extract.git
+   ```
+
+6. Check it worked — try it in a terminal with **no** conda env active, it
+   should behave exactly the same:
+
+   ```bash
+   auriga-extract --help
+   ```
+
+**You never need `conda activate` to run the tool.** pipx put a launcher on your
+PATH that points straight at the tool's own environment, so `auriga-extract`
+works from any terminal, conda active or not.
+
+Two things worth knowing:
+
+- **To update later:** `pipx upgrade auriga-extract`. If `pipx` isn't found
+  outside conda, run `conda activate base` first — pipx itself lives in conda's
+  Python, even though `auriga-extract` doesn't.
+- **If you ever uninstall conda**, reinstall the tool afterwards with the same
+  `pipx install` line: it was built from conda's Python and goes with it.
+
 </details>
 
 Works the same on macOS, Windows, and Linux.
@@ -137,16 +161,24 @@ Works the same on macOS, Windows, and Linux.
 python -m pip install --user pipx   # one-time, skip if you have pipx
 python -m pipx ensurepath           # then restart your terminal
 
-git clone https://github.com/clemmbn/auriga-extract.git
-cd auriga-extract
-pipx install .
+pipx install git+https://github.com/clemmbn/auriga-extract.git
 ```
 
 `auriga-extract` is now a command available from any directory.
-Already use [uv](https://docs.astral.sh/uv/)?
-`uv tool install .` works the same way and is a bit faster.
+Already use [uv](https://docs.astral.sh/uv/)? Swap the last line for
+`uv tool install git+https://github.com/clemmbn/auriga-extract.git`.
 
-To update after pulling new changes: `git pull && pipx install --force .`
+To work on the code instead, clone the repo and run `pipx install --editable .`
+inside it.
+
+### Updating the tool
+
+```bash
+pipx upgrade auriga-extract
+```
+
+If it reports it's already up to date but you know a new version is out, force a
+fresh fetch with `pipx reinstall auriga-extract`.
 
 ## Usage
 
@@ -232,7 +264,7 @@ main one, so it's easy to show/hide or wipe and redo.
   Files) and tap it; iOS opens it in Calendar with an "Add to Calendar"
   prompt. If it doesn't work, watch [this video](https://www.youtube.com/watch?v=xEaamiZDWuo).
 
-## Updating after a schedule change
+## Re-exporting after a schedule change
 
 Just re-run the same command and re-import the new file:
 
