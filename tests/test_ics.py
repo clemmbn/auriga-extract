@@ -31,7 +31,7 @@ def test_build_combined_calendar_includes_every_course():
         [_intervention(2, "2026-09-18T06:30:00Z", "2026-09-18T08:00:00Z")],
     )
 
-    calendar = build_combined_calendar(
+    calendar, n_events = build_combined_calendar(
         [course_a, course_b],
         date(2026, 9, 1),
         date(2026, 9, 30),
@@ -40,6 +40,7 @@ def test_build_combined_calendar_includes_every_course():
 
     events = calendar.walk("VEVENT")
     assert len(events) == 2
+    assert n_events == 2
     uids = {str(event["uid"]) for event in events}
     assert uids == {
         "auriga-1@auriga.isae-supaero",
@@ -59,10 +60,13 @@ def test_build_combined_calendar_skips_unusable_dates():
         ],
     )
 
-    calendar = build_combined_calendar([course], date(2026, 9, 1), date(2026, 9, 30))
+    calendar, n_events = build_combined_calendar([course], date(2026, 9, 1), date(2026, 9, 30))
 
     events = calendar.walk("VEVENT")
     assert len(events) == 1
+    # The count must reflect what was written, not what was offered: the course
+    # carries two occurrences and only one of them is usable.
+    assert n_events == 1
 
 
 def test_write_calendar_writes_one_file(tmp_path: Path):

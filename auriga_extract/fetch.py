@@ -322,8 +322,15 @@ def fetch_interventions(
         interventions = (payload or {}).get("interventions") or []
         # Month chunks do not overlap, but an event spanning a boundary could
         # appear twice; keying by id makes the merge idempotent regardless.
-        for item in interventions:
-            by_id[item.get("id")] = item
+        for position, item in enumerate(interventions):
+            # An id-less record (never seen in practice, but the field is not
+            # guaranteed) would otherwise key on None and be overwritten by the
+            # next one, silently dropping events. A per-record fallback key
+            # keeps it, at the cost of not deduplicating it across chunks.
+            key = item.get("id")
+            if key is None:
+                key = f"__no-id__/{chunk_start.isoformat()}/{position}"
+            by_id[key] = item
         console.print(f"  [dim]{label}:[/] [bold]{len(interventions)}[/] events")
 
     ordered = sorted(by_id.values(), key=lambda i: str(i.get("startDateTime") or ""))

@@ -49,7 +49,7 @@ finish before the next one.
 5. Paste, one line at a time:
 
    ```bash
-   git clone https://github.com/<your-org>/auriga-extract.git
+   git clone https://github.com/clemmbn/auriga-extract.git
    cd auriga-extract
    pipx install .
    ```
@@ -78,7 +78,7 @@ finish before the next one.
 6. Paste, one line at a time:
 
    ```bash
-   git clone https://github.com/<your-org>/auriga-extract.git
+   git clone https://github.com/clemmbn/auriga-extract.git
    cd auriga-extract
    pipx install .
    ```
@@ -161,9 +161,11 @@ default. Pass `--start`/`--end` to export a different range.
    detects your session on its own. **On later runs you're usually already
    logged in and this step is skipped entirely.**
 2. **Wait** while it fetches your schedule, month by month.
-3. **Pick courses** to keep from the table shown (`1,3`, `1-6`, `all`,
-   `none`). Course-less one-offs (holidays, admin notices, language
-   classes...) are listed separately so nothing gets lost.
+3. **Pick courses** to keep from the table shown. Press **Enter** to take
+   everything, or type numbers (`1,3`), ranges (`1-6`), `all !3,5` to keep
+   everything except a few, or `none` to abort. Course-less one-offs
+   (holidays, admin notices, language classes...) are listed separately so
+   nothing gets lost.
 4. **Get the file** — one combined `.ics`, written to `~/Downloads` by
    default (`--out <dir>` to change it), path printed at the end.
 
@@ -193,6 +195,7 @@ below.
 ### All options
 
 ```
+--version        print the version and exit
 --start START    first day, YYYY-MM-DD (default: 2026-09-01)
 --end END        last day, YYYY-MM-DD (default: 2027-08-31)
 --out OUT        output directory (default: ~/Downloads)
@@ -227,7 +230,7 @@ main one, so it's easy to show/hide or wipe and redo.
   calendar) to avoid duplicates.
 - **iPhone/iPad without a Mac** — send yourself the file (email, AirDrop,
   Files) and tap it; iOS opens it in Calendar with an "Add to Calendar"
-  prompt.
+  prompt. If it doesn't work, watch [this video](https://www.youtube.com/watch?v=xEaamiZDWuo).
 
 ## Updating after a schedule change
 
@@ -256,6 +259,10 @@ above).
   `--profile <other-folder>`.
 - **"The browser never opened port 9222":** something else is using the port.
   Retry with `--port 9333`.
+- **"Reusing the browser already open on port 9222":** a browser (probably one
+  this tool left open) is already listening there. It gets pointed at the
+  portal and left running at the end, since it isn't ours to close. Use
+  `--port 9333` if you'd rather have a fresh window.
 - **"Never saw an authenticated request":** the login didn't finish, or the
   planning view never opened. Re-run and complete the login in the window.
 - **It asks you to log in every time:** if it's been more than half a day
@@ -265,3 +272,9 @@ above).
   writable.
 - **`auriga-extract: command not found` after install:** restart your
   terminal so `pipx ensurepath`'s PATH change takes effect.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Not affiliated with or endorsed by ISAE-SUPAERO
+or the Auriga portal's vendor; it reads your own timetable, with your own
+login, the same way the portal's web page does.

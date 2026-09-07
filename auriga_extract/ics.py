@@ -129,16 +129,19 @@ def _summary_for(course: Course, intervention: dict[str, Any]) -> str:
     return f"{code} · {course.title}" if code else course.title
 
 
-def _add_course_events(calendar: Calendar, course: Course, dtstamp: datetime) -> None:
+def _add_course_events(calendar: Calendar, course: Course, dtstamp: datetime) -> int:
     """
     Add every occurrence of one course as a VEVENT on an existing Calendar.
 
     calendar: the in-progress combined Calendar to append to.
     course: the course whose occurrences become events.
     dtstamp: DTSTAMP value shared by every event in this export run.
+    Returns how many events were actually added, which is not necessarily
+    len(course.occurrences) -- see below.
     Side effect: mutates calendar. Skips occurrences with no usable
     start/end instant, printing why.
     """
+    written = 0
     for intervention in course.occurrences:
         start = parse_instant(intervention.get("startDateTime"))
         end = parse_instant(intervention.get("endDateTime"))
@@ -164,11 +167,14 @@ def _add_course_events(calendar: Calendar, course: Course, dtstamp: datetime) ->
             event.add("description", description)
 
         calendar.add_component(event)
+        written += 1
+
+    return written
 
 
 def build_combined_calendar(
     courses: list[Course], start: date, end: date, stamp: Optional[datetime] = None
-) -> Calendar:
+) -> tuple[Calendar, int]:
     """
     Render every selected course into one icalendar Calendar.
 
@@ -176,8 +182,11 @@ def build_combined_calendar(
     start, end: the requested export range; used for the calendar's display
     name and to pad the VTIMEZONE bounds if no occurrence has usable dates.
     stamp: DTSTAMP value; defaults to now (injectable for deterministic tests).
-    Returns one Calendar containing a single VTIMEZONE plus one VEVENT per
-    occurrence, across all courses, that has a usable start and end.
+    Returns (calendar, n_events): one Calendar containing a single VTIMEZONE
+    plus one VEVENT per occurrence, across all courses, that has a usable start
+    and end -- and the count of those events. The count is returned rather than
+    inferred from the courses, because occurrences with unusable dates are
+    skipped and reporting them as written would overstate the file's contents.
     """
     calendar = Calendar()
     calendar.add("prodid", PRODID)
@@ -201,10 +210,9 @@ def build_combined_calendar(
     calendar.add_component(Timezone.from_tzinfo(SCHOOL_TZ, TZID, tz_first, tz_last))
 
     dtstamp = stamp or datetime.now(tz=ZoneInfo("UTC"))
-    for course in courses:
-        _add_course_events(calendar, course, dtstamp)
+    n_events = sum(_add_course_events(calendar, course, dtstamp) for course in courses)
 
-    return calendar
+    return calendar, n_events
 
 
 def write_calendar(courses: list[Course], out_root: Path, start: date, end: date) -> Path:
@@ -219,12 +227,11 @@ def write_calendar(courses: list[Course], out_root: Path, start: date, end: date
     """
     out_root.mkdir(parents=True, exist_ok=True)
     path = out_root / f"auriga_{start.isoformat()}_{end.isoformat()}.ics"
-    calendar = build_combined_calendar(courses, start, end)
+    calendar, n_events = build_combined_calendar(courses, start, end)
     path.write_bytes(calendar.to_ical())
 
-    total_sessions = sum(len(course.occurrences) for course in courses)
     console.print(
         f"[dim][ics][/] wrote [green]{path.name}[/] "
-        f"({len(courses)} course(s), {total_sessions} session(s))"
+        f"({len(courses)} course(s), {n_events} session(s))"
     )
     return path

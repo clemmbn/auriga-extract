@@ -58,6 +58,13 @@ REDACTED_HEADERS = {
 CREDENTIAL_BODY_MARKERS = (
     "/protocol/openid-connect/token",
     "/protocol/openid-connect/userinfo",
+    # Returns the portal's third-party Mapbox API key in plaintext. Not the
+    # user's credential -- every logged-in student is served the same one -- but
+    # it is still somebody's API key, and writing it into a directory that gets
+    # kept and re-read would quietly break the promise made above. Nothing in it
+    # helps understand the timetable API. Found while verifying a probe capture
+    # on 2026-09-07.
+    "/api/privateConfig",
 )
 
 # Only these resource types are recorded. The portal's data all arrives as

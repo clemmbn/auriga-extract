@@ -118,3 +118,137 @@ def test_token_expiry_reads_jwt_claim():
 def test_token_expiry_tolerates_opaque_tokens():
     """An unreadable token is fine -- it just means no expiry line is printed."""
     assert cdp.token_expiry("Bearer not-a-jwt") is None
+
+
+# --------------------------------------------------------------------------
+# Browser lifecycle: launching, adopting, and shutting down
+#
+# Both branches below are failure modes that cascade. A browser left running
+# holds the profile lock, so one bad run turns into a tool that appears
+# permanently broken; a browser closed that we never opened destroys work the
+# user was doing in their own window.
+# --------------------------------------------------------------------------
+
+
+class _FakeProc:
+    """Stands in for subprocess.Popen: never exits, records terminate()."""
+
+    def __init__(self):
+        self.terminated = False
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        self.terminated = True
+
+
+def test_open_terminates_the_browser_when_the_port_never_opens(monkeypatch, tmp_path):
+    """
+    A browser that starts but never opens its debugging port must be killed.
+
+    Leaving it running is worse than the failure: it keeps the profile
+    directory locked, so every later run trips the "profile is already in use"
+    path instead, and the tool looks broken until the user finds a stray window.
+    """
+    proc = _FakeProc()
+    monkeypatch.setattr(cdp, "_spawn", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(cdp, "port_alive", lambda port: False)
+    monkeypatch.setattr(cdp.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(RuntimeError, match="never opened port"):
+        cdp.BrowserSession.open(
+            "https://portal.test/#/planning",
+            profile=tmp_path / "profile",
+            browser_path="/bin/chrome",
+        )
+
+    assert proc.terminated
+
+
+def test_adopting_a_running_browser_steers_it_to_the_portal(monkeypatch, tmp_path):
+    """
+    A browser already on the port is sitting wherever its owner left it.
+
+    Nothing downstream recovers from that: wait_for_token only nudges once the
+    tab is on the app host, so a tab parked elsewhere yields no API call, no
+    token, and a silent wait until the full 300s timeout expires.
+    """
+    navigated = []
+    monkeypatch.setattr(cdp, "port_alive", lambda port: True)
+    monkeypatch.setattr(
+        cdp.BrowserSession, "navigate", lambda self, url, **kwargs: navigated.append(url)
+    )
+
+    session = cdp.BrowserSession.open(
+        "https://portal.test/#/planning", profile=tmp_path / "profile"
+    )
+
+    assert navigated == ["https://portal.test/#/planning"]
+    assert session.launched is False
+
+
+def test_adopting_a_browser_that_cannot_be_steered_is_not_fatal(monkeypatch, tmp_path):
+    """Advisory, not fatal -- the user can still navigate the tab by hand."""
+
+    def boom(self, url, **kwargs):
+        raise RuntimeError("no debuggable tab available")
+
+    monkeypatch.setattr(cdp, "port_alive", lambda port: True)
+    monkeypatch.setattr(cdp.BrowserSession, "navigate", boom)
+
+    session = cdp.BrowserSession.open("https://portal.test/", profile=tmp_path / "p")
+    assert session.launched is False
+
+
+def test_close_leaves_an_adopted_browser_running(monkeypatch, tmp_path):
+    """Closing a window the user opened for their own work would be destructive."""
+    closed = []
+    monkeypatch.setattr(cdp, "port_alive", lambda port: True)
+    monkeypatch.setattr(cdp.BrowserSession, "navigate", lambda self, url, **kwargs: None)
+    monkeypatch.setattr(
+        cdp, "devtools_json", lambda port, path="/json": closed.append(path) or {}
+    )
+
+    session = cdp.BrowserSession.open("https://portal.test/", profile=tmp_path / "p")
+    session.close()
+
+    assert closed == []
+
+
+def test_close_shuts_down_a_browser_we_launched(monkeypatch, tmp_path):
+    """The normal path still closes the window this run opened."""
+    proc = _FakeProc()
+    alive = iter([False, True])
+    monkeypatch.setattr(cdp, "_spawn", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(cdp, "port_alive", lambda port: next(alive, True))
+
+    session = cdp.BrowserSession.open(
+        "https://portal.test/", profile=tmp_path / "p", browser_path="/bin/chrome"
+    )
+    assert session.launched is True
+
+    asked = []
+    monkeypatch.setattr(
+        cdp,
+        "devtools_json",
+        lambda port, path="/json": asked.append(path) or {"webSocketDebuggerUrl": "ws://x/1"},
+    )
+    monkeypatch.setattr(cdp, "WebSocket", lambda url, timeout=5: _FakeWebSocket())
+    monkeypatch.setattr(cdp.time, "sleep", lambda seconds: None)
+    session.close()
+
+    assert "/json/version" in asked
+
+
+class _FakeWebSocket:
+    """Accepts the Browser.close command without touching a real socket."""
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, text):
+        self.sent.append(text)
+
+    def close(self):
+        pass

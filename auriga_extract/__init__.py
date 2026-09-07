@@ -21,4 +21,5 @@ Package layout mirrors the pipeline stages so any one can be debugged alone:
   - cli.py      : orchestration
 """
 
-__version__ = "0.1.0"
+# Single source of truth: pyproject.toml reads this via hatchling.
+__version__ = "1.0.0"

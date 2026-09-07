@@ -9,7 +9,9 @@ simple as the original brief assumed, because the live data has two wrinkles
   - About a third of events carry no pedagogical unit at all. Some are
     genuinely administrative (welcome talks, forums, holiday blocks), but some
     are real recurring classes such as "3A LV1-ANGLAIS". They are grouped by
-    their description instead and flagged, so the user can decide.
+    their description instead and flagged, so the user can decide. An event with
+    neither a unit code nor a description falls back to its own id, i.e. it
+    stays a group of one -- see course_key for why merging them would be wrong.
 
   - A single session can carry up to three unit codes at once -- one shared
     class counting toward three parallel tracks. The student attends it once,
@@ -63,18 +65,28 @@ def course_key(intervention: dict[str, Any]) -> str:
 
     intervention: a raw API intervention.
     Returns a stable string key: sorted unit codes joined by "+", or a
-    description-derived key prefixed with NO_UNIT_PREFIX when no unit exists.
+    description-derived key prefixed with NO_UNIT_PREFIX when no unit exists,
+    or an id-derived key when there is no description either.
 
     Sorting the codes is essential -- the API emits the same three-unit
     combination in different orders on different records, which would otherwise
     split one course into several.
+
+    The id fallback is the opposite trade-off, and deliberate. Every event with
+    no unit AND no description would otherwise share one key and be presented as
+    a single course -- unrelated one-offs fused into one all-or-nothing entry in
+    the picker. Keying on the id instead leaves each as its own group: more rows
+    to scan, but nothing silently merged. Grouping wrongly cannot be undone by
+    the user; an extra row can just be skipped.
     """
     codes = sorted(unit.get("code", "") for unit in _unit_nodes(intervention) if unit.get("code"))
     if codes:
         return "+".join(codes)
 
     description = _normalize(intervention.get("description") or "")
-    return NO_UNIT_PREFIX + (description.lower() or "(sans description)")
+    if description:
+        return NO_UNIT_PREFIX + description.lower()
+    return f"{NO_UNIT_PREFIX}id:{intervention.get('id')}"
 
 
 @dataclass

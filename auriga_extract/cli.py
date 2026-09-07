@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
+from . import __version__
 from .capture import CaptureSink, attach
 from .cdp import DEFAULT_PORT, BrowserSession, default_profile
 from .console import console
@@ -109,7 +110,10 @@ def run(
         console.print(f"[red]{exc}[/]")
         return 1
 
-    console.print(f"[dim]Login is remembered in {session.profile}[/]")
+    # Only true for a browser we launched ourselves; an adopted one is running
+    # on whatever profile its owner gave it, so claiming otherwise would be a lie.
+    if session.launched:
+        console.print(f"[dim]Login is remembered in {session.profile}[/]")
 
     hash_route = _hash_route(url)
     try:
@@ -154,6 +158,10 @@ def run(
     console.rule("[bold green]Done[/]", style="green")
     console.print(f"Wrote [bold]{path.resolve()}[/]")
     console.print("Double-click the .ics file from your file explorer to import it into your calendar.")
+    console.print(
+        "[dim]See [link=https://github.com/clemmbn/auriga-extract#import-into-your-calendar]"
+        "this link[/link] for other import options.[/]"
+    )
     return 0
 
 
@@ -166,6 +174,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="auriga-extract",
         description="Export ISAE-SUPAERO timetable courses from Auriga as .ics files.",
+    )
+    parser.add_argument(
+        # So a bug report can name the exact build it came from.
+        "--version",
+        action="version",
+        version=f"auriga-extract {__version__}",
     )
     parser.add_argument(
         "--start",
@@ -250,14 +264,23 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         capture_dir = args.capture / datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    return run(
-        args.start,
-        args.end,
-        args.url,
-        args.out,
-        capture_dir,
-        port=args.port,
-        profile=args.profile,
-        browser_path=args.browser,
-        keep_browser=args.keep_browser,
-    )
+    try:
+        return run(
+            args.start,
+            args.end,
+            args.url,
+            args.out,
+            capture_dir,
+            port=args.port,
+            profile=args.profile,
+            browser_path=args.browser,
+            keep_browser=args.keep_browser,
+        )
+    except KeyboardInterrupt:
+        # run()'s own handler catches Exception, and KeyboardInterrupt is not one
+        # -- so without this a Ctrl-C anywhere in the run (most likely during the
+        # long fetch) ends in a raw traceback. run()'s finally has already closed
+        # the browser by the time we get here. 130 is the shell convention for
+        # "terminated by SIGINT".
+        console.print("\n[yellow]Cancelled.[/]")
+        return 130

@@ -68,3 +68,25 @@ def test_unrecognized_bang_prefix_raises():
         pass
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_bare_enter_selects_everything():
+    """
+    Pressing Enter at the picker exports the whole timetable.
+
+    This reverses the original behaviour, where empty input meant "abort". The
+    common case by far is wanting every course, and an invisible input is a poor
+    way to ask for nothing -- 'none' is the explicit way to abort.
+    """
+    assert parse_selection("", 4) == [0, 1, 2, 3]
+
+
+def test_whitespace_only_input_selects_everything():
+    """Stray spaces before Enter must not change the meaning."""
+    assert parse_selection("   ", 4) == [0, 1, 2, 3]
+
+
+def test_none_still_aborts():
+    """The explicit abort words must survive the Enter change."""
+    for word in ("none", "aucun", "rien", "NONE", "  none  "):
+        assert parse_selection(word, 4) == []

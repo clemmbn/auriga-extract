@@ -81,10 +81,12 @@ def parse_selection(text: str, count: int) -> list[int]:
     of the timetable is wanted and only a few entries should be dropped.
     """
     cleaned = (text or "").strip().lower()
-    if not cleaned or cleaned in SELECT_NONE:
-        return []
-    if cleaned in SELECT_ALL:
+    # A bare Enter is the common case (export everything), so it selects all
+    # rather than aborting -- "none"/"aucun"/"rien" is how you abort instead.
+    if not cleaned or cleaned in SELECT_ALL:
         return list(range(count))
+    if cleaned in SELECT_NONE:
+        return []
 
     if "!" in cleaned:
         head, _, remainder = cleaned.partition("!")
@@ -192,8 +194,8 @@ def prompt(courses: list[Course]) -> list[Course]:
 
     while True:
         console.print(
-            "\n[bold]Which courses?[/] Numbers ('1,3,5'), ranges ('1-6'), "
-            "'all', 'all !3,5' to exclude, or 'none' to abort."
+            "\n[bold]Which courses?[/] Press [bold]Enter[/] to select all, or type "
+            "numbers ('1,3,5'), ranges ('1-6'), 'all !3,5' to exclude, or 'none' to abort."
         )
         try:
             raw = console.input("[bold cyan]> [/]")

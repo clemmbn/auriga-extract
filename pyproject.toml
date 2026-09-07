@@ -1,12 +1,18 @@
 [project]
 name = "auriga-extract"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Export ISAE-SUPAERO timetable courses from Auriga as a combined .ics file"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
-    "icalendar>=7.3.0",
-    "rich>=15.0.0",
+    # Upper bounds are deliberate. Students install this months after it was
+    # last touched, and resolve whatever is newest at that moment. The
+    # VTIMEZONE correctness in ics.py rests on icalendar 7.x's
+    # Timezone.from_tzinfo; a major bump could move it without warning.
+    "icalendar>=7.3.0,<8",
+    "rich>=15.0.0,<16",
 ]
 
 [project.scripts]
@@ -15,6 +21,11 @@ auriga-extract = "auriga_extract.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Version lives in auriga_extract/__init__.py so there is exactly one place to
+# change it, and --version can report it without importing packaging metadata.
+[tool.hatch.version]
+path = "auriga_extract/__init__.py"
 
 [dependency-groups]
 dev = [

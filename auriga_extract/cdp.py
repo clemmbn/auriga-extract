@@ -547,6 +547,10 @@ class BrowserSession:
     browser_path: str
     app_host: str
     proc: Optional[subprocess.Popen] = None
+    # False when we adopted a browser that was already listening on the port.
+    # close() consults this: shutting down a window the user opened for their
+    # own work would be a rude surprise, and it is not ours to close.
+    launched: bool = True
     _dev: Optional[DevTools] = field(default=None, repr=False)
     # Which DevTools target _dev is attached to, so a tab that navigates to a
     # new target can be noticed. See connect().
@@ -570,7 +574,8 @@ class BrowserSession:
         browser_path: explicit executable, or None to auto-detect.
         Returns a ready session. Raises RuntimeError with actionable text when
         no browser exists, the profile is already in use, or the port never
-        opens. Side effect: may spawn a browser window.
+        opens. Side effect: may spawn a browser window, or navigate an existing
+        one to url.
         """
         profile = profile or default_profile()
         app_host = urllib.parse.urlsplit(url).netloc
@@ -580,10 +585,29 @@ class BrowserSession:
         # profile-lock collision a second launch would hit.
         if port_alive(port):
             console.print(f"[dim]Reusing the browser already open on port {port}.[/]")
-            return cls(port=port, profile=profile, browser_path="(reused)", app_host=app_host)
+            session = cls(
+                port=port,
+                profile=profile,
+                browser_path="(reused)",
+                app_host=app_host,
+                launched=False,
+            )
+            # An adopted browser is sitting wherever its owner left it, which is
+            # usually NOT the portal. Nothing downstream would recover from that:
+            # wait_for_token only nudges once the tab is already on the app host,
+            # so a tab parked elsewhere means no nudge, no API call, no token --
+            # and a silent wait until the full timeout expires.
+            try:
+                session.navigate(url)
+            except Exception as exc:  # noqa: BLE001 - advisory, not fatal
+                console.print(
+                    f"[yellow]Could not steer that browser to the portal ({exc}).\n"
+                    f"Open {url} in it yourself, or re-run with --port <other-port>.[/]"
+                )
+            return session
 
         browser_path = browser_path or find_chromium()
-        console.print(f"[dim]Launching {os.path.basename(browser_path)}...[/]")
+        console.print(f"[dim]Launching {os.path.basename(browser_path)}... This window will close on its own.[/]")
         proc = _spawn(browser_path, port, profile, url)
 
         # Chrome opens the debugging port a little after the process starts;
@@ -607,6 +631,14 @@ class BrowserSession:
                 )
             time.sleep(0.5)
 
+        # Leaving this process running would be worse than the failure itself:
+        # it keeps the profile directory locked, so every later run trips the
+        # "profile is already in use" path above and the tool looks permanently
+        # broken until the user hunts down a stray window.
+        try:
+            proc.terminate()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
         raise RuntimeError(
             f"The browser never opened port {port}.\nTry again with --port <other-port>."
         )
@@ -654,6 +686,20 @@ class BrowserSession:
         except Exception:  # noqa: BLE001 - the tab may be mid-navigation
             return ""
 
+    def navigate(self, url: str, timeout: float = 30.0) -> None:
+        """
+        Point the observed tab at a URL.
+
+        url: absolute page URL to load.
+        timeout: seconds to wait for the protocol reply.
+        Side effect: navigates the tab, which tears down the DevTools socket --
+        so the connection is dropped afterwards and the next connect() rebuilds
+        it against whatever target the navigation produced.
+        Raises on protocol errors or when no tab is available.
+        """
+        self.connect().call("Page.navigate", {"url": url}, timeout=timeout)
+        self.drop()
+
     def evaluate(self, expression: str, timeout: float = 30.0) -> Any:
         """
         Run JavaScript in the observed tab.
@@ -683,6 +729,11 @@ class BrowserSession:
         """
         self.drop()
         if keep_open:
+            return
+        if not self.launched:
+            # Adopted from an already-listening port, so it belongs to whoever
+            # started it -- possibly the user, mid-task in their own window.
+            console.print("[dim]Leaving the browser open; this run did not start it.[/]")
             return
         try:
             endpoint = devtools_json(self.port, "/json/version")["webSocketDebuggerUrl"]
