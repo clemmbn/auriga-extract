@@ -2,17 +2,22 @@
 Entrypoint that wires the four layers together.
 
 Flow: open a real browser -> wait for the user to log in -> read the bearer
-token off the app's own traffic -> pull the date range from the API -> close
-the browser -> group, let the user pick, write .ics files.
+token off the app's own traffic -> close the browser -> pull the date range
+from the API over plain HTTP -> group, let the user pick, write one .ics file.
 
-One deliberate design point: there is no "press Enter when you're logged in"
-prompt. The tool watches for the first authenticated API request the app makes
-and proceeds from there, so login completion is detected rather than asserted.
-That also sidesteps a trap in Playwright's sync API, where blocking on input()
-stops network events from being dispatched at all.
+Two deliberate design points:
 
-The browser is closed before the interactive picker, because everything needed
-is already in memory by then and a stale window would only invite confusion.
+  - There is no "press Enter when you're logged in" prompt. The tool watches for
+    the first authenticated API request the app makes and proceeds from there,
+    so login completion is detected rather than asserted -- the tool can never
+    charge ahead on a claim that turns out to be false.
+
+  - The browser is closed as soon as the token is in hand, before any data is
+    fetched. The API answers ordinary HTTP requests (see fetch.py), so the
+    browser has no job left, and a stale window would only invite confusion.
+
+The login persists between runs in a browser profile directory (see cdp.py),
+so the common case is that no login is needed at all.
 """
 
 from __future__ import annotations
@@ -23,29 +28,19 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
-from rich.panel import Panel
-
 from .capture import CaptureSink, attach
+from .cdp import DEFAULT_PORT, BrowserSession, default_profile
 from .console import console
 from .courses import group_courses
-from .fetch import TokenSniffer, fetch_interventions, wait_for_token
+from .fetch import fetch_interventions, wait_for_token
 from .ics import write_calendar
-from .probe import DEFAULT_URL, _launch_browser
+from .probe import DEFAULT_URL
 from .select import prompt
 
 # Covers the full 2026-2027 academic year, so a plain run with no
 # --start/--end grabs the whole thing.
 DEFAULT_START = date(2026, 9, 1)
 DEFAULT_END = date(2027, 8, 31)
-
-LOGIN_BANNER = (
-    "A browser window is open on the portal.\n\n"
-    "  ->  Log in as you normally would.\n\n"
-    "Nothing else is needed: as soon as the portal makes its first\n"
-    "authenticated request, this tool picks the session up automatically\n"
-    "and starts fetching."
-)
 
 
 def _origin(url: str) -> str:
@@ -59,72 +54,90 @@ def _origin(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def _hash_route(url: str) -> str:
+    """
+    Extract the SPA hash route from a portal URL.
+
+    url: the portal page URL, e.g. ".../#/mainContent/menuEntry/227/planning".
+    Returns the fragment with its leading '#', or the planning default when the
+    URL carries none. Used to nudge the app into refetching.
+    """
+    fragment = urlsplit(url).fragment
+    return f"#{fragment}" if fragment else "#/mainContent/menuEntry/227/planning"
+
+
 def run(
     start: date,
     end: date,
     url: str,
     out_root: Path,
-    channel: Optional[str],
     capture_dir: Optional[Path],
+    port: int = DEFAULT_PORT,
+    profile: Optional[Path] = None,
+    browser_path: Optional[str] = None,
+    keep_browser: bool = False,
 ) -> int:
     """
     Execute one full extraction run.
 
     start, end: inclusive date range to export.
     url: portal page to open.
-    out_root: parent directory for generated .ics files.
-    channel: preferred browser channel, or None for bundled Chromium.
-    capture_dir: when set, also record all network traffic there for debugging.
+    out_root: parent directory for the generated .ics file.
+    capture_dir: when set, also record network traffic there for debugging.
+    port: browser remote-debugging port.
+    profile: persistent browser profile directory, or None for the default.
+    browser_path: explicit browser executable, or None to auto-detect.
+    keep_browser: leave the browser window open at the end.
     Returns a process exit code.
-    Side effects: launches a browser, reads stdin, writes .ics files.
+    Side effects: launches a browser, reads stdin, writes an .ics file.
     """
     if end < start:
         console.print(f"[red]--end ({end}) is before --start ({start})[/]")
         return 2
 
-    sniffer = TokenSniffer()
     sink: Optional[CaptureSink] = None
     interventions: list = []
 
     console.rule("[bold cyan]Auriga Extract[/]", style="cyan")
     console.print()
 
-    with sync_playwright() as playwright:
-        browser = _launch_browser(playwright, channel, headless=False)
-        context = browser.new_context(
-            locale="fr-FR",
-            timezone_id="Europe/Paris",
-            no_viewport=True,
+    try:
+        session = BrowserSession.open(
+            url, port=port, profile=profile, browser_path=browser_path
         )
-        sniffer.attach(context)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/]")
+        return 1
+
+    console.print(f"[dim]Login is remembered in {session.profile}[/]")
+
+    hash_route = _hash_route(url)
+    try:
         if capture_dir:
             sink = CaptureSink(capture_dir)
-            attach(context, sink)
+            attach(session.connect(), sink)
 
-        page = context.new_page()
-        try:
-            console.print("Opening the timetable portal in a browser window...")
-            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"[yellow]Navigation problem ({type(exc).__name__}: {exc})[/]")
-            console.print("[yellow]The window is open -- navigate to the portal manually.[/]")
+        token = wait_for_token(session, hash_route, observer=sink)
 
-        console.print()
-        console.print(Panel(LOGIN_BANNER, title="AURIGA EXTRACT", border_style="cyan"))
+        # The browser stays open through the fetch for one reason only: if the
+        # token expires mid-run, this is what can get another one. With a
+        # persisted login a run can start on an already-old token, which was
+        # impossible when every run began with a fresh manual login.
+        def refresh() -> str:
+            return wait_for_token(session, hash_route, observer=sink)
 
-        try:
-            token = wait_for_token(page, sniffer)
-            interventions = fetch_interventions(page, _origin(url), token, start, end)
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"\n[red]Extraction failed: {exc}[/]")
-            return 1
-        finally:
-            if sink:
-                sink.close()
-            try:
-                browser.close()
-            except Exception:  # noqa: BLE001 - user may have closed it already
-                pass
+        interventions = fetch_interventions(
+            _origin(url), token, start, end, refresh_token=refresh
+        )
+    except Exception as exc:  # noqa: BLE001
+        console.print(f"\n[red]Extraction failed: {exc}[/]")
+        return 1
+    finally:
+        if sink:
+            sink.close()
+        # Closed before the picker: everything needed is in memory by now, and
+        # a stale window would only invite confusion.
+        session.close(keep_open=keep_browser)
 
     if not interventions:
         console.print("\n[yellow]No events in that range -- nothing to export.[/]")
@@ -180,14 +193,31 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="output directory (default: ~/Downloads)",
     )
     parser.add_argument(
-        "--channel",
-        default="chrome",
-        metavar="NAME",
+        "--browser",
+        default=None,
+        metavar="PATH",
+        help="path to Chrome/Edge/Brave/Chromium (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        type=Path,
+        metavar="DIR",
         help=(
-            "installed browser channel to launch, e.g. chrome, msedge "
-            "(default: chrome; required because the portal's WAF rejects "
-            "bundled Chromium's TLS fingerprint — pass '' to try it anyway)"
+            "browser profile directory; your login is remembered here "
+            f"(default: {default_profile()})"
         ),
+    )
+    parser.add_argument(
+        "--port",
+        default=DEFAULT_PORT,
+        type=int,
+        help=f"browser remote-debugging port (default: {DEFAULT_PORT})",
+    )
+    parser.add_argument(
+        "--keep-browser",
+        action="store_true",
+        help="leave the browser window open when the export finishes",
     )
     parser.add_argument(
         "--capture",
@@ -198,7 +228,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         metavar="DIR",
         help="also record network traffic here (debugging)",
     )
+    # Superseded by --browser when Playwright was dropped. Kept as an accepted
+    # no-op because earlier READMEs documented it, so people still have it in
+    # their notes; failing on it would look like the tool was broken.
+    parser.add_argument("--channel", default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.channel is not None:
+        console.print(
+            "[yellow]--channel no longer does anything; "
+            "use --browser <path> to pick a browser.[/]"
+        )
 
     capture_dir = None
     if args.capture:
@@ -206,4 +246,14 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         capture_dir = args.capture / datetime.now().strftime("%Y%m%d-%H%M%S")
 
-    return run(args.start, args.end, args.url, args.out, args.channel or None, capture_dir)
+    return run(
+        args.start,
+        args.end,
+        args.url,
+        args.out,
+        capture_dir,
+        port=args.port,
+        profile=args.profile,
+        browser_path=args.browser,
+        keep_browser=args.keep_browser,
+    )

@@ -7,12 +7,19 @@ It opens a real browser, waits for you to log in normally, then reads your
 schedule from the portal's own traffic. **Credentials are never stored or
 seen by this tool**, you log in on the portal's own page.
 
+Your login is remembered between runs, so after the first time it usually
+exports without asking you to log in at all.
+
 ## Requirements
 
 - **Python 3.11+** — [python.org/downloads](https://www.python.org/downloads/)
   (Windows: tick "Add python.exe to PATH" during install).
-- **Google Chrome** — the portal blocks the headless browser most automation
-  tools use, so this drives your real Chrome instead.
+- **A Chromium-family browser you already have** — Chrome, Edge, Brave or
+  Chromium. It's found automatically. Firefox won't work: it doesn't speak the
+  DevTools protocol this uses.
+
+Nothing else is downloaded — no browser install step, and only two small Python
+packages.
 
 ## Install
 
@@ -150,14 +157,34 @@ auriga-extract
 This exports the full 2026-2027 academic year (2026-09-01 to 2027-08-31) by
 default. Pass `--start`/`--end` to export a different range.
 
-1. **Log in** in the Chrome window that opens — no key to press, the tool
-   detects your session on its own and closes the browser once picked up.
+1. **Log in** in the browser window that opens — no key to press, the tool
+   detects your session on its own. **On later runs you're usually already
+   logged in and this step is skipped entirely.**
 2. **Wait** while it fetches your schedule, month by month.
 3. **Pick courses** to keep from the table shown (`1,3`, `1-6`, `all`,
    `none`). Course-less one-offs (holidays, admin notices, language
    classes...) are listed separately so nothing gets lost.
 4. **Get the file** — one combined `.ics`, written to `~/Downloads` by
    default (`--out <dir>` to change it), path printed at the end.
+
+### Your login is remembered
+
+The browser profile used for this lives in its own folder, separate from your
+everyday browser:
+
+| OS | Folder |
+|---|---|
+| macOS | `~/Library/Application Support/auriga-extract/chrome-profile` |
+| Windows | `%LOCALAPPDATA%\auriga-extract\chrome-profile` |
+| Linux | `~/.config/auriga-extract/chrome-profile` |
+
+It holds your portal session, exactly like a normal browser profile does.
+**To sign out, delete that folder** — the next run will ask you to log in
+again. Use `--profile <dir>` to keep it somewhere else.
+
+The school's sign-on session doesn't last forever (roughly half a day), so
+you'll be asked to log in again now and then. Re-running the same day
+normally won't ask.
 
 Every event has a stable ID, so re-exporting and re-importing later updates
 existing events instead of duplicating them — support varies by app, see
@@ -170,9 +197,10 @@ below.
 --end END        last day, YYYY-MM-DD (default: 2027-08-31)
 --out OUT        output directory (default: ~/Downloads)
 --url URL        portal page to open (default: the Supaero planning page)
---channel NAME   installed browser channel to launch, e.g. chrome, msedge
-                 (default: chrome; pass '' to try the bundled browser instead —
-                 this usually fails, since the portal blocks it)
+--browser PATH   path to Chrome/Edge/Brave/Chromium (default: auto-detect)
+--profile DIR    browser profile directory; your login is remembered here
+--port PORT      browser remote-debugging port (default: 9222)
+--keep-browser   leave the browser window open when the export finishes
 --capture [DIR]  also record raw network traffic there (debugging only)
 ```
 
@@ -221,7 +249,19 @@ above).
 
 ## Troubleshooting
 
-- **Browser fails to launch ("Couldn't start chrome"):** install Google
-  Chrome, or pass `--channel msedge` to use Edge instead.
+- **"No Chrome, Edge, Brave or Chromium installation found":** install one of
+  them, or point at it directly with `--browser "/path/to/chrome"`.
+- **"The browser closed immediately... profile is probably already in use":**
+  a browser window is already running on that profile. Close it, or use
+  `--profile <other-folder>`.
+- **"The browser never opened port 9222":** something else is using the port.
+  Retry with `--port 9333`.
+- **"Never saw an authenticated request":** the login didn't finish, or the
+  planning view never opened. Re-run and complete the login in the window.
+- **It asks you to log in every time:** if it's been more than half a day
+  since the last login, that's expected — the school's sign-on session has
+  expired. If it happens on back-to-back runs, check you're not passing a
+  different `--profile` each time, and that the folder listed above is
+  writable.
 - **`auriga-extract: command not found` after install:** restart your
   terminal so `pipx ensurepath`'s PATH change takes effect.

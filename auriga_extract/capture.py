@@ -1,13 +1,16 @@
 """
 Network-capture layer.
 
-Records every interesting HTTP response a Playwright browser context receives,
-writing an ordered JSONL index plus one file per response body. This is the
-foundation both for API discovery (probe.py) and, later, for the real
-extraction loop -- which will reuse the exact same listener to harvest calendar
-JSON while driving the UI.
+Records every interesting HTTP response the browser receives, writing an ordered
+JSONL index plus one file per response body. This is the foundation for API
+discovery (probe.py) and for the --capture debugging flag.
 
-Two constraints shape the design:
+Traffic is observed over the Chrome DevTools Protocol: Network.requestWillBeSent
+supplies the request side, Network.responseReceived the status and headers, and
+Network.getResponseBody the payload, keyed by the requestId that ties them
+together.
+
+Three constraints shape the design:
 
 1. Ordering matters more than completeness. Telling the "calendar list" call
    apart from the "event detail" call is done by correlating requests with what
@@ -15,12 +18,20 @@ Two constraints shape the design:
    counter and one append-only file.
 
 2. Nothing secret gets persisted. Request headers are written to disk and read
-   back later, so credential-bearing headers are stripped. The project spec
-   forbids storing credentials or sessions between runs.
+   back later, so credential-bearing headers are stripped. (Note the tool now
+   DOES persist a browser profile between runs, reversing INSTRUCTIONS.md:19 --
+   but that is a browser-managed folder, deliberately separate from these
+   capture directories, which stay credential-free.)
+
+3. Response bodies must be collected promptly. Network.getResponseBody reads
+   from a per-page buffer that the browser discards on navigation, so a body
+   fetched "later" is often simply gone. Hence pump(), called from the caller's
+   own event loop rather than at close time.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -52,7 +63,8 @@ CREDENTIAL_BODY_MARKERS = (
 # Only these resource types are recorded. The portal's data all arrives as
 # XHR/fetch; recording images/fonts/css would bury the signal. Anything served
 # as JSON is captured regardless of type, as a safety net for SPAs that fetch
-# through mechanisms Playwright labels differently.
+# through mechanisms the protocol labels differently. CDP capitalises these
+# ("XHR", "Fetch"), so comparisons lowercase first.
 CAPTURED_RESOURCE_TYPES = {"xhr", "fetch"}
 
 # Guard against a single pathological response filling the disk.
@@ -66,7 +78,8 @@ def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
     """
     Copy a header mapping with credential-bearing values replaced.
 
-    headers: raw header name -> value mapping from Playwright (names lowercased).
+    headers: raw header name -> value mapping; CDP preserves server casing, so
+    the comparison lowercases each name.
     Returns a new dict; values of REDACTED_HEADERS become "<redacted>".
     """
     return {
@@ -122,6 +135,10 @@ class CaptureSink:
     records: list[dict[str, Any]] = field(default_factory=list)
     _seq: int = 0
     _index_fh: Any = None
+    # requestId -> the request half of an exchange, kept until the response
+    # arrives. CDP splits one HTTP exchange across several events, and only the
+    # requestId links them.
+    _pending: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
@@ -166,28 +183,83 @@ class CaptureSink:
         )
         print(f"[capture] >>> marker: {text}")
 
-    def record_response(self, response: Any) -> None:
+    def pump(self, devtools: Any) -> None:
         """
-        Record one Playwright Response if it looks like application data.
+        Turn buffered DevTools events into capture records.
 
-        response: a playwright.sync_api.Response, delivered by the context's
-        "response" event.
-        Returns nothing. Side effects: may write a body file plus an index
-        record, and prints a one-line summary so the run is visibly working.
+        devtools: a cdp.DevTools whose .events list is read (not cleared -- the
+        caller owns that, since it may also be scanning them for a token).
+        Side effects: writes records and body files; prints one line per
+        recorded response.
 
-        Never raises: a probe that dies on one odd response (a redirect with no
+        Must be called from the caller's polling loop, promptly and often:
+        response bodies live in a buffer the browser drops on navigation.
+
+        Never raises. A probe that dies on one odd response (a redirect with no
         body, a connection reset mid-session) loses the whole session's data.
         """
-        try:
-            self._record_response_inner(response)
-        except Exception as exc:  # noqa: BLE001 - capture must never break the run
-            print(f"[capture] !! failed to record a response: {type(exc).__name__}: {exc}")
+        for message in list(devtools.events):
+            try:
+                self._handle_event(devtools, message)
+            except Exception as exc:  # noqa: BLE001 - capture must never break the run
+                print(f"[capture] !! failed to record a response: {type(exc).__name__}: {exc}")
 
-    def _record_response_inner(self, response: Any) -> None:
-        """Body of record_response; see that method. Split out to keep it flat."""
-        request = response.request
-        resource_type = request.resource_type
-        content_type = (response.headers or {}).get("content-type", "")
+    def _handle_event(self, devtools: Any, message: dict[str, Any]) -> None:
+        """
+        Dispatch one protocol event.
+
+        devtools: connection used to fetch response bodies.
+        message: a raw CDP event.
+        Side effect: updates pending state or writes a record.
+        """
+        method = message.get("method")
+        params = message.get("params") or {}
+        request_id = params.get("requestId")
+
+        if method == "Network.requestWillBeSent" and request_id:
+            request = params.get("request") or {}
+            self._pending[request_id] = {
+                "method": request.get("method", ""),
+                "headers": request.get("headers") or {},
+                "post_data": request.get("postData"),
+                "resource_type": params.get("type", ""),
+            }
+            return
+
+        if method == "Network.responseReceived" and request_id:
+            # Merge rather than replace: the request half was stored earlier and
+            # carries the headers and post body we still need.
+            entry = self._pending.setdefault(request_id, {})
+            entry["response"] = params.get("response") or {}
+            entry["resource_type"] = params.get("type", entry.get("resource_type", ""))
+            return
+
+        # loadingFinished is the earliest point at which the body is complete.
+        if method in ("Network.loadingFinished", "Network.loadingFailed") and request_id:
+            entry = self._pending.pop(request_id, None)
+            if entry and entry.get("response"):
+                self._record_exchange(devtools, request_id, entry)
+
+    def _record_exchange(self, devtools: Any, request_id: str, entry: dict[str, Any]) -> None:
+        """
+        Write one completed request/response pair.
+
+        devtools: connection used for Network.getResponseBody.
+        request_id: the CDP requestId, needed to fetch the body.
+        entry: the merged request/response state collected by _handle_event.
+        Side effects: may write a body file plus an index record; prints a
+        one-line summary so the run is visibly working.
+        """
+        response = entry["response"]
+        url = response.get("url", "")
+        content_type = (response.get("headers") or {}).get("content-type", "")
+        # CDP header names preserve server casing; normalise for the lookup.
+        if not content_type:
+            for name, value in (response.get("headers") or {}).items():
+                if name.lower() == "content-type":
+                    content_type = value
+                    break
+        resource_type = (entry.get("resource_type") or "").lower()
 
         # Early return on the overwhelming majority: static assets.
         is_json = "json" in content_type.lower()
@@ -195,24 +267,33 @@ class CaptureSink:
             return
 
         seq = self._next_seq()
-        parsed = urlparse(response.url)
+        parsed = urlparse(url)
+        method = entry.get("method", "")
+        status = response.get("status", 0)
+
+        if any(marker in url for marker in CREDENTIAL_BODY_MARKERS):
+            self._write_credential_placeholder(seq, entry, url, parsed, content_type)
+            return
 
         body_text: Optional[str] = None
         body_error: Optional[str] = None
         n_bytes = 0
-
-        if any(marker in response.url for marker in CREDENTIAL_BODY_MARKERS):
-            self._write_credential_placeholder(seq, request, response, parsed)
-            return
-
         try:
-            raw = response.body()
+            result = devtools.call(
+                "Network.getResponseBody", {"requestId": request_id}, timeout=10
+            )
+            raw_body = result.get("body", "")
+            raw = (
+                base64.b64decode(raw_body)
+                if result.get("base64Encoded")
+                else raw_body.encode("utf-8", "replace")
+            )
             n_bytes = len(raw)
             if n_bytes > MAX_BODY_BYTES:
                 body_error = f"body too large ({n_bytes} bytes), not stored"
             else:
                 body_text = raw.decode("utf-8", errors="replace")
-        except Exception as exc:  # noqa: BLE001 - redirects/empty bodies raise here
+        except Exception as exc:  # noqa: BLE001 - redirects/evicted bodies land here
             body_error = f"{type(exc).__name__}: {exc}"
 
         body_file: Optional[str] = None
@@ -224,7 +305,7 @@ class CaptureSink:
             body_path.write_text(body_text, encoding="utf-8")
             body_file = str(body_path.relative_to(self.root))
 
-        post_data = request.post_data
+        post_data = entry.get("post_data")
         if post_data and len(post_data) > MAX_POST_DATA_CHARS:
             post_data = post_data[:MAX_POST_DATA_CHARS] + "...<truncated>"
 
@@ -233,17 +314,17 @@ class CaptureSink:
                 "seq": seq,
                 "ts": datetime.now().isoformat(timespec="seconds"),
                 "kind": "response",
-                "method": request.method,
-                "url": response.url,
+                "method": method,
+                "url": url,
                 "path": parsed.path,
                 "fragment": parsed.fragment,
                 "query": {k: v for k, v in parse_qs(parsed.query).items()},
-                "status": response.status,
+                "status": status,
                 "resource_type": resource_type,
                 "content_type": content_type,
                 "bytes": n_bytes,
                 "post_data": post_data,
-                "request_headers": _redact_headers(request.headers or {}),
+                "request_headers": _redact_headers(entry.get("headers") or {}),
                 "body_file": body_file,
                 "body_error": body_error,
                 "json_shape": json_shape,
@@ -257,30 +338,40 @@ class CaptureSink:
             elif json_shape.get("type") == "object":
                 shape_note = f" object({json_shape['n_keys']} keys)"
         print(
-            f"[capture] #{seq:04d} {request.method} {response.status} "
+            f"[capture] #{seq:04d} {method} {status} "
             f"{parsed.path[:70]} {n_bytes}B{shape_note}"
         )
 
-    def _write_credential_placeholder(self, seq, request, response, parsed) -> None:
+    def _write_credential_placeholder(
+        self,
+        seq: int,
+        entry: dict[str, Any],
+        url: str,
+        parsed: Any,
+        content_type: str,
+    ) -> None:
         """
         Record that a credential endpoint was called, without its body.
 
         seq: sequence number already allocated for this response.
-        request/response: the Playwright objects.
-        parsed: the urlparse result for the response URL.
+        entry: the merged request/response state.
+        url: the full response URL.
+        parsed: the urlparse result for that URL.
+        content_type: the response content type.
         Side effect: writes an index record whose body is deliberately absent.
         """
+        method = entry.get("method", "")
         self._write(
             {
                 "seq": seq,
                 "ts": datetime.now().isoformat(timespec="seconds"),
                 "kind": "response",
-                "method": request.method,
-                "url": response.url,
+                "method": method,
+                "url": url,
                 "path": parsed.path,
-                "status": response.status,
-                "resource_type": request.resource_type,
-                "content_type": (response.headers or {}).get("content-type", ""),
+                "status": (entry.get("response") or {}).get("status", 0),
+                "resource_type": entry.get("resource_type", ""),
+                "content_type": content_type,
                 "bytes": 0,
                 "post_data": None,
                 "request_headers": {},
@@ -289,7 +380,7 @@ class CaptureSink:
                 "json_shape": None,
             }
         )
-        print(f"[capture] #{seq:04d} {request.method} {parsed.path[:60]} <body not stored: credentials>")
+        print(f"[capture] #{seq:04d} {method} {parsed.path[:60]} <body not stored: credentials>")
 
     def close(self) -> None:
         """Flush and close the index file. Safe to call twice."""
@@ -298,26 +389,22 @@ class CaptureSink:
         print(f"[capture] closed; {len(self.records)} records in {self.root}")
 
 
-def attach(context: Any, sink: CaptureSink) -> None:
+def attach(devtools: Any, sink: CaptureSink) -> None:
     """
-    Wire a Playwright browser context up to a sink.
+    Subscribe a DevTools connection to the network domain.
 
-    context: a playwright.sync_api.BrowserContext.
-    sink: the CaptureSink receiving records.
-    Side effect: registers event listeners for the life of the context.
+    devtools: a cdp.DevTools connection.
+    sink: the CaptureSink that will receive records via its pump().
+    Side effect: enables the Network domain on the browser side.
 
-    Listening at context level (rather than per page) means popups and tabs
-    opened during SSO are covered without extra bookkeeping, since they share
-    the context.
+    This only turns the event stream on. Nothing is recorded until the caller
+    starts calling sink.pump(devtools) from its own loop -- an explicit pull
+    rather than a callback, because bodies must be fetched with a live
+    connection and the caller is the one who knows when it has one.
 
-    Caveat for callers: Playwright's sync API only dispatches these events
-    while the main thread is inside a Playwright call. A caller that blocks on
-    input() will see events pile up and arrive late, out of order relative to
-    markers -- see probe.py for the pump-and-poll pattern that avoids this.
+    Note the subscription belongs to the socket: after any reconnect, this must
+    be called again. cdp.BrowserSession.connect() handles that for its own
+    connections.
     """
-    context.on("response", sink.record_response)
-    context.on(
-        "page",
-        lambda page: print(f"[capture] new page/tab opened: {page.url[:90]}"),
-    )
-    print("[capture] listeners attached to browser context")
+    devtools.call("Network.enable", timeout=15)
+    print("[capture] network events enabled")

@@ -2,12 +2,11 @@
 API discovery probe for the Auriga student portal.
 
 Why this exists: the portal's calendar endpoints, their date parameters and
-their JSON schemas are undocumented, and requests replayed outside a browser
-are rejected by a WAF. So rather than guessing a schema and writing a parser
-against it, this tool opens a real browser, lets the user log in and drive the
-UI by hand, and records every XHR/fetch that results -- annotated with markers
-saying what the user was doing. Reading that capture is what tells us which
-endpoint returns the event list and which returns the event detail panel.
+their JSON schemas are undocumented. Rather than guessing a schema and writing a
+parser against it, this tool opens a real browser, lets the user log in and
+drive the UI by hand, and records every XHR/fetch that results -- annotated with
+markers saying what the user was doing. Reading that capture is what tells us
+which endpoint returns the event list and which returns the event detail panel.
 
 Run it:      uv run python -m auriga_extract.probe
 Re-read it:  uv run python -m auriga_extract.probe --analyze captures/<dir>
@@ -23,14 +22,14 @@ import json
 import queue
 import sys
 import threading
+import time
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from playwright.sync_api import sync_playwright
-
 from .capture import CaptureSink, attach
+from .cdp import DEFAULT_PORT, TRANSIENT_ERRORS, BrowserSession, default_profile
 
 # The planning view of the ISAE-SUPAERO Auriga instance. Overridable, because
 # the hash-route may well change between school years.
@@ -39,9 +38,9 @@ DEFAULT_URL = (
     "/#/mainContent/menuEntry/227/planning"
 )
 
-# How long each pump iteration waits inside Playwright. Small enough that the
+# How long each pump iteration spends reading events. Small enough that the
 # console echo feels live, large enough not to spin the CPU.
-PUMP_INTERVAL_MS = 200
+PUMP_INTERVAL_SECONDS = 0.2
 
 WALKTHROUGH = """
 ================================ AURIGA PROBE ================================
@@ -60,40 +59,6 @@ finished; the browser closes and a summary is printed.
 """
 
 
-def _launch_browser(playwright: Any, channel: Optional[str], headless: bool) -> Any:
-    """
-    Start a browser, preferring the user's real Chrome install.
-
-    playwright: the sync_playwright() manager.
-    channel: browser channel to try first ("chrome"), or None for bundled Chromium.
-    headless: whether to run without a window (only useful for testing).
-    Returns a Browser. Side effect: spawns a browser process.
-
-    Real Chrome plus the automation-flag suppression is deliberate: the portal
-    already blocks non-browser clients, so there is no reason to volunteer the
-    obvious automation tells. Falls back through msedge (present on every
-    Windows machine, and Chromium-based enough to pass the same WAF check)
-    before finally falling back to bundled Chromium, which the WAF rejects.
-    """
-    args = ["--disable-blink-features=AutomationControlled"]
-
-    tried = []
-    if channel:
-        candidates = [channel] if channel != "chrome" else ["chrome", "msedge"]
-        for candidate in candidates:
-            try:
-                return playwright.chromium.launch(
-                    channel=candidate, headless=headless, args=args
-                )
-            except Exception as exc:  # noqa: BLE001
-                tried.append(candidate)
-                print(f"Couldn't start {candidate} ({exc}); trying the next option")
-
-    if tried:
-        print(f"None of {', '.join(tried)} were available; falling back to the built-in browser")
-    return playwright.chromium.launch(headless=headless, args=args)
-
-
 def _stdin_reader(out_queue: "queue.Queue[str]") -> None:
     """
     Read lines from stdin forever, pushing them onto a queue.
@@ -101,42 +66,55 @@ def _stdin_reader(out_queue: "queue.Queue[str]") -> None:
     out_queue: receives each stripped line; receives "done" on EOF.
     Runs on a daemon thread. Side effect: consumes stdin.
 
-    Reading input on a separate thread is what lets the main thread stay inside
-    Playwright calls. Blocking the main thread on input() would stall
-    Playwright's event dispatch, so responses would arrive in a burst after the
-    user pressed Enter -- landing on the wrong side of their marker and
-    destroying the correlation this whole tool exists to produce.
+    Reading input on a separate thread is what lets the main thread keep
+    draining network events. Blocking the main thread on input() would stall the
+    pump, so responses would arrive in a burst after the user pressed Enter --
+    landing on the wrong side of their marker and destroying the correlation
+    this whole tool exists to produce. It would also lose response bodies, which
+    the browser evicts on navigation.
     """
     for line in sys.stdin:
         out_queue.put(line.strip())
     out_queue.put("done")
 
 
-def _marker_loop(page: Any, sink: CaptureSink) -> None:
+def _marker_loop(session: BrowserSession, sink: CaptureSink) -> None:
     """
-    Interleave user markers with live Playwright event dispatch.
+    Interleave user markers with live network-event collection.
 
-    page: the Playwright Page, used purely as something to poll against.
-    sink: the CaptureSink receiving markers.
+    session: the browser session being observed.
+    sink: the CaptureSink receiving markers and responses.
     Returns when the user types a quit word or the browser goes away.
-    Side effects: writes markers; prints progress.
+    Side effects: writes markers and records; prints progress.
     """
     commands: "queue.Queue[str]" = queue.Queue()
     threading.Thread(target=_stdin_reader, args=(commands,), daemon=True).start()
 
     print(WALKTHROUGH)
+    misses = 0
 
     while True:
         try:
             line = commands.get_nowait()
         except queue.Empty:
-            # No input pending: spend the interval inside Playwright so queued
-            # network events get dispatched to the sink right now.
+            # No input pending: spend the interval collecting events so the sink
+            # sees them (and can pull their bodies) right now.
             try:
-                page.wait_for_timeout(PUMP_INTERVAL_MS)
-            except Exception as exc:  # noqa: BLE001 - page/browser closed by the user
-                print(f"[probe] browser window is gone ({type(exc).__name__}); wrapping up")
-                return
+                dev = session.connect()
+                dev.drain(PUMP_INTERVAL_SECONDS)
+                sink.pump(dev)
+                dev.events.clear()
+                misses = 0
+            except TRANSIENT_ERRORS:
+                # Expected during login: every SSO redirect kills the socket.
+                session.drop()
+                misses += 1
+                # Only give up once reconnection has failed repeatedly, which
+                # means the window is really gone rather than just navigating.
+                if misses > 20:
+                    print("[probe] browser window is gone; wrapping up")
+                    return
+                time.sleep(0.5)
             continue
 
         if line.lower() in {"done", "quit", "exit", "q"}:
@@ -265,52 +243,38 @@ def load_records(capture_dir: Path) -> list[dict[str, Any]]:
     return records
 
 
-def run_probe(url: str, out_root: Path, channel: Optional[str], headless: bool) -> Path:
+def run_probe(
+    url: str,
+    out_root: Path,
+    port: int = DEFAULT_PORT,
+    profile: Optional[Path] = None,
+    browser_path: Optional[str] = None,
+) -> Path:
     """
     Drive one interactive discovery session end to end.
 
     url: page to open before handing control to the user.
     out_root: parent directory for capture folders; a timestamped subfolder is created.
-    channel: preferred browser channel, or None for bundled Chromium.
-    headless: run without a window (testing only -- manual login needs a window).
+    port: browser remote-debugging port.
+    profile: persistent browser profile directory, or None for the default.
+    browser_path: explicit browser executable, or None to auto-detect.
     Returns the capture directory. Side effects: launches a browser, writes the
     capture, prints a summary.
     """
     capture_dir = out_root / datetime.now().strftime("%Y%m%d-%H%M%S")
     sink = CaptureSink(capture_dir)
 
-    with sync_playwright() as playwright:
-        browser = _launch_browser(playwright, channel, headless)
-        # French locale and Paris timezone so any server-side date formatting
-        # matches what the timetable is meant to express; no_viewport lets the
-        # page use the real window size, which matters for a calendar grid.
-        context = browser.new_context(
-            locale="fr-FR",
-            timezone_id="Europe/Paris",
-            no_viewport=True,
-        )
-        attach(context, sink)
-        page = context.new_page()
+    print(f"[probe] opening {url}")
+    session = BrowserSession.open(url, port=port, profile=profile, browser_path=browser_path)
 
-        try:
-            print(f"[probe] navigating to {url}")
-            # domcontentloaded, not networkidle: this is an SPA that may poll,
-            # so waiting for network silence can hang until timeout.
-            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[probe] initial navigation problem ({type(exc).__name__}: {exc})")
-            print("[probe] the window is still open -- navigate manually if needed")
-
-        try:
-            _marker_loop(page, sink)
-        except KeyboardInterrupt:
-            print("\n[probe] interrupted")
-        finally:
-            try:
-                browser.close()
-            except Exception:  # noqa: BLE001 - already gone if the user closed it
-                pass
-            sink.close()
+    try:
+        attach(session.connect(), sink)
+        _marker_loop(session, sink)
+    except KeyboardInterrupt:
+        print("\n[probe] interrupted")
+    finally:
+        session.close()
+        sink.close()
 
     print_summary(sink.records)
     return capture_dir
@@ -329,11 +293,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--url", default=DEFAULT_URL, help="page to open (default: planning view)")
     parser.add_argument("--out", default="captures", type=Path, help="where capture folders go")
     parser.add_argument(
-        "--channel",
-        default="chrome",
-        help="browser channel; pass empty string to force bundled Chromium",
+        "--browser",
+        default=None,
+        metavar="PATH",
+        help="path to Chrome/Edge/Brave/Chromium (default: auto-detect)",
     )
-    parser.add_argument("--headless", action="store_true", help="no window (testing only)")
+    parser.add_argument(
+        "--profile",
+        default=None,
+        type=Path,
+        metavar="DIR",
+        help=f"browser profile directory (default: {default_profile()})",
+    )
+    parser.add_argument(
+        "--port",
+        default=DEFAULT_PORT,
+        type=int,
+        help=f"browser remote-debugging port (default: {DEFAULT_PORT})",
+    )
     parser.add_argument(
         "--analyze",
         type=Path,
@@ -346,7 +323,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         print_summary(load_records(args.analyze))
         return 0
 
-    capture_dir = run_probe(args.url, args.out, args.channel or None, args.headless)
+    capture_dir = run_probe(
+        args.url,
+        args.out,
+        port=args.port,
+        profile=args.profile,
+        browser_path=args.browser,
+    )
     print(f"\n[probe] capture saved to: {capture_dir}")
     return 0
 
