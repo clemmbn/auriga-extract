@@ -149,7 +149,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--end", required=True, type=date.fromisoformat, help="last day, YYYY-MM-DD"
     )
-    parser.add_argument("--url", default=DEFAULT_URL, help="portal page to open")
+    parser.add_argument(
+        "--url",
+        default=DEFAULT_URL,
+        help=f"portal page to open (default: {DEFAULT_URL})",
+    )
     parser.add_argument(
         # ~/Downloads is the standard user download location on macOS, Windows
         # (Path.home() resolves %USERPROFILE% there), and most Linux desktops.
@@ -161,7 +165,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--channel",
         default="chrome",
-        help="browser channel; pass empty string to force bundled Chromium",
+        metavar="NAME",
+        help=(
+            "installed browser channel to launch, e.g. chrome, msedge "
+            "(default: chrome; required because the portal's WAF rejects "
+            "bundled Chromium's TLS fingerprint — pass '' to try it anyway)"
+        ),
     )
     parser.add_argument(
         "--capture",
