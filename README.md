@@ -102,6 +102,43 @@ Already use [uv](https://docs.astral.sh/uv/)?
 
 To update after pulling new changes: `git pull && pipx install --force .`
 
+### Using conda?
+
+> **⚠️ Don't `pip install` or `conda install` this tool directly into a conda
+> environment.** Mixing conda and pip installs of the same packages in one
+> environment can leave you with two incompatible versions fighting over the
+> same files (conflicting binaries, broken imports) — annoying to debug and
+> easy to avoid.
+
+Use **pipx** for this tool even if you have conda installed — pipx creates
+its own isolated environment, completely separate from any conda env, so
+there's no interaction at all:
+
+```bash
+conda deactivate          # make sure no conda env is active
+python -m pip install --user pipx
+python -m pipx ensurepath
+git clone https://github.com/clemmbn/auriga-extract.git
+cd auriga-extract
+pipx install .
+```
+
+`auriga-extract` is then available from any terminal, conda-activated or
+not.
+
+If you'd rather install it inside a conda env anyway (e.g. to match a course
+setup), keep it consistent: create a dedicated env, then install *only* with
+`pip` inside it — never both:
+
+```bash
+conda create -n auriga python=3.11 -y
+conda activate auriga
+pip install -e .
+```
+
+You'll then need `conda activate auriga` every time before running
+`auriga-extract`, which is the main reason pipx is recommended above.
+
 ## Usage
 
 ```bash
