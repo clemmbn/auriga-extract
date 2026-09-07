@@ -29,8 +29,6 @@ Key constraints from the brief:
 - `ics.py` — calendar generation.
 - `cli.py` — orchestration; `extract_schedule.py` at the repo root is a thin shim over it.
 
-`main.py` is still the unused `uv` hello-world stub.
-
 ## The Auriga API (confirmed from a live capture, 2026-09-07)
 
 Base: `https://isaesupaero-production.np-auriga.nfrance.net`
