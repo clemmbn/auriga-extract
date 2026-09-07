@@ -74,12 +74,15 @@ def run(
     Side effects: launches a browser, reads stdin, writes .ics files.
     """
     if end < start:
-        print(f"[cli] --end ({end}) is before --start ({start})")
+        console.print(f"[red]--end ({end}) is before --start ({start})[/]")
         return 2
 
     sniffer = TokenSniffer()
     sink: Optional[CaptureSink] = None
     interventions: list = []
+
+    console.rule("[bold cyan]Auriga Extract[/]", style="cyan")
+    console.print()
 
     with sync_playwright() as playwright:
         browser = _launch_browser(playwright, channel, headless=False)
@@ -95,19 +98,20 @@ def run(
 
         page = context.new_page()
         try:
-            console.print(f"[dim][cli][/] opening {url}")
+            console.print("Opening the timetable portal in a browser window...")
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         except Exception as exc:  # noqa: BLE001
-            console.print(f"[yellow][cli][/] navigation problem ({type(exc).__name__}: {exc})")
-            console.print("[yellow][cli][/] the window is open -- navigate to the portal manually")
+            console.print(f"[yellow]Navigation problem ({type(exc).__name__}: {exc})[/]")
+            console.print("[yellow]The window is open -- navigate to the portal manually.[/]")
 
+        console.print()
         console.print(Panel(LOGIN_BANNER, title="AURIGA EXTRACT", border_style="cyan"))
 
         try:
             token = wait_for_token(page, sniffer)
             interventions = fetch_interventions(page, _origin(url), token, start, end)
         except Exception as exc:  # noqa: BLE001
-            console.print(f"[red][cli][/] extraction failed: {exc}")
+            console.print(f"\n[red]Extraction failed: {exc}[/]")
             return 1
         finally:
             if sink:
@@ -118,18 +122,20 @@ def run(
                 pass
 
     if not interventions:
-        console.print("[yellow][cli][/] no events in that range -- nothing to export")
+        console.print("\n[yellow]No events in that range -- nothing to export.[/]")
         return 0
 
     courses = group_courses(interventions)
     selected = prompt(courses)
     if not selected:
-        console.print("[yellow][cli][/] nothing selected; no files written")
+        console.print("\n[yellow]Nothing selected; no files written.[/]")
         return 0
 
     path = write_calendar(selected, out_root, start, end)
-    console.print(f"\n[green][cli][/] done -- wrote [bold]{path.resolve()}[/]")
-    console.print("[dim][cli][/] double-click the .ics to import it into Apple Calendar")
+    console.print()
+    console.rule("[bold green]Done[/]", style="green")
+    console.print(f"Wrote [bold]{path.resolve()}[/]")
+    console.print("Double-click the .ics file from your file explorer to import it into your calendar.")
     return 0
 
 
@@ -140,7 +146,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     argv: argument list for testing; defaults to sys.argv[1:].
     """
     parser = argparse.ArgumentParser(
-        prog="extract_schedule",
+        prog="auriga-extract",
         description="Export ISAE-SUPAERO timetable courses from Auriga as .ics files.",
     )
     parser.add_argument(

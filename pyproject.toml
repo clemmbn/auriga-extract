@@ -1,7 +1,7 @@
 [project]
 name = "auriga-extract"
 version = "0.1.0"
-description = "Add your description here"
+description = "Export ISAE-SUPAERO timetable courses from Auriga as a combined .ics file"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,6 +9,13 @@ dependencies = [
     "playwright>=1.62.0",
     "rich>=15.0.0",
 ]
+
+[project.scripts]
+auriga-extract = "auriga_extract.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [

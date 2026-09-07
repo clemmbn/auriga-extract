@@ -212,9 +212,11 @@ def group_courses(interventions: list[dict[str, Any]]) -> list[Course]:
         course.occurrences.sort(key=lambda i: str(i.get("startDateTime") or ""))
 
     n_coded = sum(1 for c in courses if c.has_unit)
+    n_uncoded = len(courses) - n_coded
+    console.print()
+    console.rule("[bold cyan]Grouping into courses[/]", style="cyan")
     console.print(
-        f"[cyan][courses][/] {len(interventions)} events -> "
-        f"[bold]{len(courses)}[/] groups "
-        f"({n_coded} with a unit code, {len(courses) - n_coded} without)"
+        f"Grouped {len(interventions)} events into [bold]{len(courses)}[/] courses "
+        f"({n_coded} matched to an official course code, {n_uncoded} grouped by name only)"
     )
     return courses

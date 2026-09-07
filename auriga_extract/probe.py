@@ -78,12 +78,10 @@ def _launch_browser(playwright: Any, channel: Optional[str], headless: bool) -> 
 
     if channel:
         try:
-            print(f"[probe] launching browser (channel={channel}, headless={headless})")
             return playwright.chromium.launch(channel=channel, headless=headless, args=args)
         except Exception as exc:  # noqa: BLE001
-            print(f"[probe] channel '{channel}' unavailable ({exc}); using bundled Chromium")
+            print(f"Couldn't start {channel} ({exc}); falling back to the built-in browser")
 
-    print(f"[probe] launching bundled Chromium (headless={headless})")
     return playwright.chromium.launch(headless=headless, args=args)
 
 

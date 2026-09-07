@@ -183,9 +183,11 @@ def prompt(courses: list[Course]) -> list[Course]:
     Treats EOF/Ctrl-C as selecting nothing rather than crashing.
     """
     if not courses:
-        console.print("[yellow][select][/] nothing to choose from")
+        console.print("[yellow]Nothing to choose from.[/]")
         return []
 
+    console.print()
+    console.rule("[bold cyan]Pick your courses[/]", style="cyan")
     render(courses)
 
     while True:
@@ -196,21 +198,21 @@ def prompt(courses: list[Course]) -> list[Course]:
         try:
             raw = console.input("[bold cyan]> [/]")
         except (EOFError, KeyboardInterrupt):
-            console.print("\n[yellow][select][/] aborted")
+            console.print("\n[yellow]Aborted.[/]")
             return []
 
         try:
             indices = parse_selection(raw, len(courses))
         except ValueError as exc:
-            console.print(f"[red][select][/] {exc} -- try again")
+            console.print(f"[red]{exc} -- try again.[/]")
             continue
 
         picked = [courses[i] for i in indices]
         if not picked:
-            console.print("[yellow][select][/] nothing selected")
+            console.print("[yellow]Nothing selected.[/]")
             return []
 
-        console.print(f"[green][select][/] {len(picked)} course(s) selected:")
+        console.print(f"\n[green]{len(picked)} course(s) selected:[/]")
         for course in picked:
             console.print(f"   - {course.title[:60]} ({len(course.occurrences)} sessions)")
         return picked
