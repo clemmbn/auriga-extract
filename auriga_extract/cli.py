@@ -128,7 +128,7 @@ def run(
         return 0
 
     path = write_calendar(selected, out_root, start, end)
-    console.print(f"\n[green][cli][/] done -- wrote [bold]{path.name}[/]")
+    console.print(f"\n[green][cli][/] done -- wrote [bold]{path.resolve()}[/]")
     console.print("[dim][cli][/] double-click the .ics to import it into Apple Calendar")
     return 0
 
@@ -150,7 +150,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--end", required=True, type=date.fromisoformat, help="last day, YYYY-MM-DD"
     )
     parser.add_argument("--url", default=DEFAULT_URL, help="portal page to open")
-    parser.add_argument("--out", default=Path("output"), type=Path, help="output directory")
+    parser.add_argument(
+        # ~/Downloads is the standard user download location on macOS, Windows
+        # (Path.home() resolves %USERPROFILE% there), and most Linux desktops.
+        "--out",
+        default=Path.home() / "Downloads",
+        type=Path,
+        help="output directory (default: ~/Downloads)",
+    )
     parser.add_argument(
         "--channel",
         default="chrome",

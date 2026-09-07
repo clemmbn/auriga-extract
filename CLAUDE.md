@@ -89,7 +89,7 @@ Export a date range (opens real Chrome; log in when it appears — no keypress n
 uv run python extract_schedule.py --start 2026-09-01 --end 2027-06-30
 ```
 
-Useful flags: `--out` (default `output/`), `--url`, `--channel ""` to force bundled Chromium, `--capture` to also record traffic for debugging.
+Useful flags: `--out` (default `~/Downloads`), `--url`, `--channel ""` to force bundled Chromium, `--capture` to also record traffic for debugging.
 
 Run a fresh API-discovery session, if the portal changes:
 
