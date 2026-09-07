@@ -23,3 +23,5 @@ output/
 # Claude-specific
 .claude
 docs/
+CLAUDE.md
+INSTRUCTIONS.md
