@@ -85,24 +85,8 @@ you this tool.
 
 </details>
 
-Works the same on macOS, Windows, and Linux.
-
-```bash
-python -m pip install --user pipx   # one-time, skip if you have pipx
-python -m pipx ensurepath           # then restart your terminal
-
-git clone https://github.com/clemmbn/auriga-extract.git
-cd auriga-extract
-pipx install .
-```
-
-`auriga-extract` is now a command available from any directory.
-Already use [uv](https://docs.astral.sh/uv/)?
-`uv tool install .` works the same way and is a bit faster.
-
-To update after pulling new changes: `git pull && pipx install --force .`
-
-### Using conda?
+<details>
+<summary><strong>Using conda?</strong></summary>
 
 > **⚠️ Don't `pip install` or `conda install` this tool directly into a conda
 > environment.** Mixing conda and pip installs of the same packages in one
@@ -138,6 +122,24 @@ pip install -e .
 
 You'll then need `conda activate auriga` every time before running
 `auriga-extract`, which is the main reason pipx is recommended above.
+</details>
+
+Works the same on macOS, Windows, and Linux.
+
+```bash
+python -m pip install --user pipx   # one-time, skip if you have pipx
+python -m pipx ensurepath           # then restart your terminal
+
+git clone https://github.com/clemmbn/auriga-extract.git
+cd auriga-extract
+pipx install .
+```
+
+`auriga-extract` is now a command available from any directory.
+Already use [uv](https://docs.astral.sh/uv/)?
+`uv tool install .` works the same way and is a bit faster.
+
+To update after pulling new changes: `git pull && pipx install --force .`
 
 ## Usage
 
