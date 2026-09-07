@@ -24,24 +24,23 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from playwright.sync_api import sync_playwright
+from rich.panel import Panel
 
 from .capture import CaptureSink, attach
+from .console import console
 from .courses import group_courses
 from .fetch import TokenSniffer, fetch_interventions, wait_for_token
-from .ics import write_courses
+from .ics import write_calendar
 from .probe import DEFAULT_URL, _launch_browser
 from .select import prompt
 
-LOGIN_BANNER = """
-=============================== AURIGA EXTRACT ===============================
-A browser window is open on the portal.
-
-  ->  Log in as you normally would.
-
-Nothing else is needed: as soon as the portal makes its first authenticated
-request, this tool picks the session up automatically and starts fetching.
-==============================================================================
-"""
+LOGIN_BANNER = (
+    "A browser window is open on the portal.\n\n"
+    "  ->  Log in as you normally would.\n\n"
+    "Nothing else is needed: as soon as the portal makes its first\n"
+    "authenticated request, this tool picks the session up automatically\n"
+    "and starts fetching."
+)
 
 
 def _origin(url: str) -> str:
@@ -96,19 +95,19 @@ def run(
 
         page = context.new_page()
         try:
-            print(f"[cli] opening {url}")
+            console.print(f"[dim][cli][/] opening {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         except Exception as exc:  # noqa: BLE001
-            print(f"[cli] navigation problem ({type(exc).__name__}: {exc})")
-            print("[cli] the window is open -- navigate to the portal manually")
+            console.print(f"[yellow][cli][/] navigation problem ({type(exc).__name__}: {exc})")
+            console.print("[yellow][cli][/] the window is open -- navigate to the portal manually")
 
-        print(LOGIN_BANNER)
+        console.print(Panel(LOGIN_BANNER, title="AURIGA EXTRACT", border_style="cyan"))
 
         try:
             token = wait_for_token(page, sniffer)
             interventions = fetch_interventions(page, _origin(url), token, start, end)
         except Exception as exc:  # noqa: BLE001
-            print(f"[cli] extraction failed: {exc}")
+            console.print(f"[red][cli][/] extraction failed: {exc}")
             return 1
         finally:
             if sink:
@@ -119,18 +118,18 @@ def run(
                 pass
 
     if not interventions:
-        print("[cli] no events in that range -- nothing to export")
+        console.print("[yellow][cli][/] no events in that range -- nothing to export")
         return 0
 
     courses = group_courses(interventions)
     selected = prompt(courses)
     if not selected:
-        print("[cli] nothing selected; no files written")
+        console.print("[yellow][cli][/] nothing selected; no files written")
         return 0
 
-    paths = write_courses(selected, out_root, start, end)
-    print(f"\n[cli] done -- {len(paths)} file(s) written")
-    print("[cli] double-click any .ics to import it into Apple Calendar")
+    path = write_calendar(selected, out_root, start, end)
+    console.print(f"\n[green][cli][/] done -- wrote [bold]{path.name}[/]")
+    console.print("[dim][cli][/] double-click the .ics to import it into Apple Calendar")
     return 0
 
 
