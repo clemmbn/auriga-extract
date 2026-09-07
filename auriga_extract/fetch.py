@@ -177,7 +177,13 @@ def fetch_interventions(
     """
     by_id: dict[Any, dict[str, Any]] = {}
     chunks = month_chunks(start, end)
-    span = f"{start.strftime('%-d %B %Y')} -> {end.strftime('%-d %B %Y')}"
+    # %-d (no leading zero) is a glibc/macOS strftime extension; Windows'
+    # C runtime rejects it with "invalid format string". %d plus lstrip
+    # gets the same "7 September 2026" rendering everywhere.
+    def _day_month_year(d: date) -> str:
+        return f"{d.strftime('%d %B %Y').lstrip('0')}"
+
+    span = f"{_day_month_year(start)} -> {_day_month_year(end)}"
 
     console.print()
     console.rule("[bold cyan]Fetching your timetable[/]", style="cyan")

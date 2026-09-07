@@ -71,17 +71,26 @@ def _launch_browser(playwright: Any, channel: Optional[str], headless: bool) -> 
 
     Real Chrome plus the automation-flag suppression is deliberate: the portal
     already blocks non-browser clients, so there is no reason to volunteer the
-    obvious automation tells. Falls back to bundled Chromium if Chrome is
-    missing rather than failing the run.
+    obvious automation tells. Falls back through msedge (present on every
+    Windows machine, and Chromium-based enough to pass the same WAF check)
+    before finally falling back to bundled Chromium, which the WAF rejects.
     """
     args = ["--disable-blink-features=AutomationControlled"]
 
+    tried = []
     if channel:
-        try:
-            return playwright.chromium.launch(channel=channel, headless=headless, args=args)
-        except Exception as exc:  # noqa: BLE001
-            print(f"Couldn't start {channel} ({exc}); falling back to the built-in browser")
+        candidates = [channel] if channel != "chrome" else ["chrome", "msedge"]
+        for candidate in candidates:
+            try:
+                return playwright.chromium.launch(
+                    channel=candidate, headless=headless, args=args
+                )
+            except Exception as exc:  # noqa: BLE001
+                tried.append(candidate)
+                print(f"Couldn't start {candidate} ({exc}); trying the next option")
 
+    if tried:
+        print(f"None of {', '.join(tried)} were available; falling back to the built-in browser")
     return playwright.chromium.launch(headless=headless, args=args)
 
 
