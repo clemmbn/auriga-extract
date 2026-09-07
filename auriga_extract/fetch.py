@@ -26,6 +26,8 @@ from datetime import date, timedelta
 from typing import Any, Optional
 from urllib.parse import urlencode
 
+from .console import console
+
 API_PATH = "/api/plannings/me"
 
 # The UI always asks for all seven weekdays; mirroring it avoids surprising the
@@ -91,7 +93,7 @@ class TokenSniffer:
         is_new = token != self.token
         self.token = token
         if is_new:
-            print("[fetch] captured a fresh bearer token from the app's own traffic")
+            console.print("[green][fetch][/] captured a fresh bearer token from the app's own traffic")
 
 
 def wait_for_token(page: Any, sniffer: TokenSniffer, timeout_seconds: int = TOKEN_WAIT_SECONDS) -> str:
@@ -106,7 +108,7 @@ def wait_for_token(page: Any, sniffer: TokenSniffer, timeout_seconds: int = TOKE
     Polling through Playwright (rather than sleeping) is required: the sync API
     only dispatches events while the main thread is inside a Playwright call.
     """
-    print("[fetch] waiting for the portal to make an authenticated request...")
+    console.print("[cyan][fetch][/] waiting for the portal to make an authenticated request...")
     waited = 0.0
     while waited < timeout_seconds:
         if sniffer.token:
@@ -174,7 +176,7 @@ def fetch_interventions(
     """
     by_id: dict[Any, dict[str, Any]] = {}
     chunks = month_chunks(start, end)
-    print(f"[fetch] {len(chunks)} month(s) to fetch, {start} -> {end}")
+    console.print(f"[cyan][fetch][/] [bold]{len(chunks)}[/] month(s) to fetch, {start} -> {end}")
 
     for chunk_start, chunk_end in chunks:
         url = _build_url(base_url, chunk_start, chunk_end)
@@ -195,8 +197,11 @@ def fetch_interventions(
         # appear twice; keying by id makes the merge idempotent regardless.
         for item in interventions:
             by_id[item.get("id")] = item
-        print(f"[fetch] {label}: {len(interventions)} events (running total {len(by_id)})")
+        console.print(
+            f"[dim][fetch][/] {label}: [bold]{len(interventions)}[/] events "
+            f"(running total {len(by_id)})"
+        )
 
     ordered = sorted(by_id.values(), key=lambda i: str(i.get("startDateTime") or ""))
-    print(f"[fetch] collected {len(ordered)} unique events")
+    console.print(f"[green][fetch][/] collected [bold]{len(ordered)}[/] unique events")
     return ordered
