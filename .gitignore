@@ -5,6 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache
+.ruff_cache
 
 # Virtual environments
 .venv
@@ -14,3 +16,10 @@ captures/
 
 # Generated calendars
 output/
+
+# Automatic Mac files
+.DS_Store
+
+# Claude-specific
+.claude
+docs/
