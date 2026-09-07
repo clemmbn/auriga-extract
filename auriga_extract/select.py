@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from rich.table import Table
+
+from .console import console
 from .courses import Course
 
 # Words that select everything, in both languages the portal uses.
@@ -116,26 +119,47 @@ def _summarize(course: Course) -> str:
     return " · ".join(bits) if bits else "(no metadata)"
 
 
+def _course_table(rows: list[tuple[str, str, str, str]], show_header: bool = True) -> Table:
+    """Build one rich Table for a block of course rows (# / sessions / title / details)."""
+    table = Table(show_header=show_header, header_style="bold cyan", box=None, pad_edge=False)
+    table.add_column("#", justify="right", style="bold cyan", no_wrap=True)
+    table.add_column("Sessions", justify="right", style="magenta")
+    table.add_column("Title", style="white")
+    table.add_column("Details", style="dim")
+    for row in rows:
+        table.add_row(*row)
+    return table
+
+
 def render(courses: Iterable[Course]) -> None:
     """
-    Print the numbered course listing.
+    Print the numbered course listing as rich tables.
 
-    courses: the grouped courses, already ordered for display.
-    Side effect: prints. Groups without a unit code get a heading so the
-    distinction is visible before the user picks.
+    courses: the grouped courses, already ordered for display (real courses
+    first, then description-only groups -- see courses.group_courses).
+    Side effect: prints. Description-only groups get their own table under a
+    styled heading so the distinction stays visible before the user picks.
     """
-    print()
-    print("=" * 78)
-    print("COURSES FOUND")
-    print("=" * 78)
+    coded_rows: list[tuple[str, str, str, str]] = []
+    no_unit_rows: list[tuple[str, str, str, str]] = []
 
-    heading_shown = False
     for index, course in enumerate(courses, start=1):
-        if not course.has_unit and not heading_shown:
-            print("\n--- no pedagogical unit code (one-off events, holidays, some classes) ---")
-            heading_shown = True
-        print(f"{index:3}. {len(course.occurrences):3}x  {course.title[:62]}")
-        print(f"        {_summarize(course)[:70]}")
+        row = (str(index), str(len(course.occurrences)), course.title[:62], _summarize(course)[:70])
+        if course.has_unit:
+            coded_rows.append(row)
+        else:
+            no_unit_rows.append(row)
+
+    console.print()
+    console.print("[bold cyan]COURSES FOUND[/]")
+    console.print(_course_table(coded_rows))
+
+    if no_unit_rows:
+        console.print(
+            "\n[yellow]--- no pedagogical unit code "
+            "(one-off events, holidays, some classes) ---[/]"
+        )
+        console.print(_course_table(no_unit_rows, show_header=False))
 
 
 def prompt(courses: list[Course]) -> list[Course]:
@@ -148,34 +172,34 @@ def prompt(courses: list[Course]) -> list[Course]:
     Treats EOF/Ctrl-C as selecting nothing rather than crashing.
     """
     if not courses:
-        print("[select] nothing to choose from")
+        console.print("[yellow][select][/] nothing to choose from")
         return []
 
     render(courses)
 
     while True:
-        print(
-            "\nWhich courses? Numbers ('1,3,5'), ranges ('1-6'), "
-            "'all', or 'none' to abort."
+        console.print(
+            "\n[bold]Which courses?[/] Numbers ('1,3,5'), ranges ('1-6'), "
+            "'all', 'all !3,5' to exclude, or 'none' to abort."
         )
         try:
-            raw = input("> ")
+            raw = console.input("[bold cyan]> [/]")
         except (EOFError, KeyboardInterrupt):
-            print("\n[select] aborted")
+            console.print("\n[yellow][select][/] aborted")
             return []
 
         try:
             indices = parse_selection(raw, len(courses))
         except ValueError as exc:
-            print(f"[select] {exc} -- try again")
+            console.print(f"[red][select][/] {exc} -- try again")
             continue
 
         picked = [courses[i] for i in indices]
         if not picked:
-            print("[select] nothing selected")
+            console.print("[yellow][select][/] nothing selected")
             return []
 
-        print(f"[select] {len(picked)} course(s) selected:")
+        console.print(f"[green][select][/] {len(picked)} course(s) selected:")
         for course in picked:
-            print(f"   - {course.title[:60]} ({len(course.occurrences)} sessions)")
+            console.print(f"   - {course.title[:60]} ({len(course.occurrences)} sessions)")
         return picked
