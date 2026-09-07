@@ -144,8 +144,11 @@ To update after pulling new changes: `git pull && pipx install --force .`
 ## Usage
 
 ```bash
-auriga-extract --start 2026-09-01 --end 2027-06-30
+auriga-extract
 ```
+
+This exports the full 2026-2027 academic year (2026-09-01 to 2027-08-31) by
+default. Pass `--start`/`--end` to export a different range.
 
 1. **Log in** in the Chrome window that opens — no key to press, the tool
    detects your session on its own and closes the browser once picked up.
@@ -163,8 +166,8 @@ below.
 ### All options
 
 ```
---start START    first day, YYYY-MM-DD (required)
---end END        last day, YYYY-MM-DD (required)
+--start START    first day, YYYY-MM-DD (default: 2026-09-01)
+--end END        last day, YYYY-MM-DD (default: 2027-08-31)
 --out OUT        output directory (default: ~/Downloads)
 --url URL        portal page to open (default: the Supaero planning page)
 --channel NAME   installed browser channel to launch, e.g. chrome, msedge
@@ -203,7 +206,7 @@ main one, so it's easy to show/hide or wipe and redo.
 Just re-run the same command and re-import the new file:
 
 ```bash
-auriga-extract --start 2026-09-01 --end 2027-06-30
+auriga-extract
 ```
 
 This works because every event gets a stable ID derived from the portal's

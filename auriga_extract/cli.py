@@ -34,6 +34,11 @@ from .ics import write_calendar
 from .probe import DEFAULT_URL, _launch_browser
 from .select import prompt
 
+# Covers the full 2026-2027 academic year, so a plain run with no
+# --start/--end grabs the whole thing.
+DEFAULT_START = date(2026, 9, 1)
+DEFAULT_END = date(2027, 8, 31)
+
 LOGIN_BANNER = (
     "A browser window is open on the portal.\n\n"
     "  ->  Log in as you normally would.\n\n"
@@ -150,10 +155,16 @@ def main(argv: Optional[list[str]] = None) -> int:
         description="Export ISAE-SUPAERO timetable courses from Auriga as .ics files.",
     )
     parser.add_argument(
-        "--start", required=True, type=date.fromisoformat, help="first day, YYYY-MM-DD"
+        "--start",
+        default=DEFAULT_START,
+        type=date.fromisoformat,
+        help=f"first day, YYYY-MM-DD (default: {DEFAULT_START.isoformat()})",
     )
     parser.add_argument(
-        "--end", required=True, type=date.fromisoformat, help="last day, YYYY-MM-DD"
+        "--end",
+        default=DEFAULT_END,
+        type=date.fromisoformat,
+        help=f"last day, YYYY-MM-DD (default: {DEFAULT_END.isoformat()})",
     )
     parser.add_argument(
         "--url",
