@@ -1,0 +1,10 @@
+[project]
+name = "auriga-extract"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "icalendar>=7.3.0",
+    "playwright>=1.62.0",
+]
