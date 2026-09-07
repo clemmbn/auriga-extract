@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from rich import box
 from rich.table import Table
 
 from .console import console
@@ -119,9 +120,17 @@ def _summarize(course: Course) -> str:
     return " · ".join(bits) if bits else "(no metadata)"
 
 
-def _course_table(rows: list[tuple[str, str, str, str]], show_header: bool = True) -> Table:
-    """Build one rich Table for a block of course rows (# / sessions / title / details)."""
-    table = Table(show_header=show_header, header_style="bold cyan", box=None, pad_edge=False)
+def _course_table(rows: list[tuple[str, str, str, str]], title: str, title_style: str) -> Table:
+    """Build one bordered rich Table for a block of course rows (# / sessions / title / details)."""
+    table = Table(
+        title=title,
+        title_style=f"bold {title_style}",
+        title_justify="left",
+        header_style="bold cyan",
+        box=box.ROUNDED,
+        border_style=title_style,
+        show_lines=False,
+    )
     table.add_column("#", justify="right", style="bold cyan", no_wrap=True)
     table.add_column("Sessions", justify="right", style="magenta")
     table.add_column("Title", style="white")
@@ -133,12 +142,12 @@ def _course_table(rows: list[tuple[str, str, str, str]], show_header: bool = Tru
 
 def render(courses: Iterable[Course]) -> None:
     """
-    Print the numbered course listing as rich tables.
+    Print the numbered course listing as bordered rich tables.
 
     courses: the grouped courses, already ordered for display (real courses
     first, then description-only groups -- see courses.group_courses).
-    Side effect: prints. Description-only groups get their own table under a
-    styled heading so the distinction stays visible before the user picks.
+    Side effect: prints. Description-only groups get their own bordered table
+    so the distinction stays visible before the user picks.
     """
     coded_rows: list[tuple[str, str, str, str]] = []
     no_unit_rows: list[tuple[str, str, str, str]] = []
@@ -151,15 +160,17 @@ def render(courses: Iterable[Course]) -> None:
             no_unit_rows.append(row)
 
     console.print()
-    console.print("[bold cyan]COURSES FOUND[/]")
-    console.print(_course_table(coded_rows))
+    console.print(_course_table(coded_rows, "COURSES FOUND", "cyan"))
 
     if no_unit_rows:
+        console.print()
         console.print(
-            "\n[yellow]--- no pedagogical unit code "
-            "(one-off events, holidays, some classes) ---[/]"
+            _course_table(
+                no_unit_rows,
+                "No pedagogical unit code (one-off events, holidays, some classes)",
+                "yellow",
+            )
         )
-        console.print(_course_table(no_unit_rows, show_header=False))
 
 
 def prompt(courses: list[Course]) -> list[Course]:
