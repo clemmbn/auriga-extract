@@ -16,25 +16,8 @@ seen by this tool**, you log in on the portal's own page.
 
 ## Install
 
-Works the same on macOS, Windows, and Linux.
-
-```bash
-python -m pip install --user pipx   # one-time, skip if you have pipx
-python -m pipx ensurepath           # then restart your terminal
-
-git clone https://github.com/<your-org>/auriga-extract.git
-cd auriga-extract
-pipx install .
-```
-
-`auriga-extract` is now a command available from any directory.
-Already use [uv](https://docs.astral.sh/uv/)?
-`uv tool install .` works the same way and is a bit faster.
-
-To update after pulling new changes: `git pull && pipx install --force .`
-
 <details>
-<summary><strong>Never used a terminal before? Click here for a full walkthrough.</strong></summary>
+<summary><strong>Never used a terminal before?</strong></summary>
 
 A terminal is just a window where you type commands and press Enter. Type or
 paste each command below one at a time, press Enter, and wait for it to
@@ -101,6 +84,23 @@ If any step prints an error, copy the exact text and check the
 you this tool.
 
 </details>
+
+Works the same on macOS, Windows, and Linux.
+
+```bash
+python -m pip install --user pipx   # one-time, skip if you have pipx
+python -m pipx ensurepath           # then restart your terminal
+
+git clone https://github.com/<your-org>/auriga-extract.git
+cd auriga-extract
+pipx install .
+```
+
+`auriga-extract` is now a command available from any directory.
+Already use [uv](https://docs.astral.sh/uv/)?
+`uv tool install .` works the same way and is a bit faster.
+
+To update after pulling new changes: `git pull && pipx install --force .`
 
 ## Usage
 
