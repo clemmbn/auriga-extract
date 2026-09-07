@@ -198,6 +198,24 @@ main one, so it's easy to show/hide or wipe and redo.
   Files) and tap it; iOS opens it in Calendar with an "Add to Calendar"
   prompt.
 
+## Updating after a schedule change
+
+Just re-run the same command and re-import the new file:
+
+```bash
+auriga-extract --start 2026-09-01 --end 2027-06-30
+```
+
+This works because every event gets a stable ID derived from the portal's
+own intervention ID (`auriga-<id>@auriga.isae-supaero`), not a random one
+generated per export. When a class is rescheduled, the portal keeps the
+same intervention ID, so the new export produces an event with the same ID
+but updated time/room/etc. A calendar app that supports it (Apple Calendar,
+Google Calendar) matches on that ID and updates the existing event in
+place instead of adding a duplicate. Outlook doesn't do ID matching on
+import, so there you still need to clear out the old batch first (see
+above).
+
 ## Troubleshooting
 
 - **Browser fails to launch ("Couldn't start chrome"):** install Google
