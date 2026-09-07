@@ -91,7 +91,7 @@ Works the same on macOS, Windows, and Linux.
 python -m pip install --user pipx   # one-time, skip if you have pipx
 python -m pipx ensurepath           # then restart your terminal
 
-git clone https://github.com/<your-org>/auriga-extract.git
+git clone https://github.com/clemmbn/auriga-extract.git
 cd auriga-extract
 pipx install .
 ```
