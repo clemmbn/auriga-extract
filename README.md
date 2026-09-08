@@ -91,67 +91,98 @@ you this tool.
 <details>
 <summary><strong>Using conda?</strong></summary>
 
-**Install it with pipx, using conda's own Python.** You don't need a separate
-Python — conda's is fine, and pipx builds the tool a private environment that no
-conda env ever touches.
+**Install it with [uv](https://docs.astral.sh/uv/), and leave conda alone.** uv
+is a single downloaded executable, not a Python package, so it cannot end up
+inside any of your environments. It builds the tool a private environment of its
+own and puts one launcher on your PATH.
 
-> **⚠️ What not to do:** don't `conda install` or `pip install` this tool into a
-> conda env. Conda and pip each keep their own record of what's installed and
-> neither sees the other's, so they can end up overwriting each other's files —
-> broken imports that are painful to diagnose. pipx sidesteps this entirely.
+> **⚠️ Do not follow the generic instructions above if you use conda.** They
+> start with `pip install --user pipx`, and `--user` is a trap here: it writes
+> into a folder (`%APPDATA%\Python\Python311\site-packages` on Windows,
+> `~/.local/lib/python3.11/site-packages` on macOS and Linux) that **every conda
+> environment on the same Python minor version reads automatically**. One
+> install, and `pipx` plus its seven dependencies show up in `pip list` and
+> under `pip:` in `conda env export` for all of them at once. Nothing is
+> actually broken, but it looks alarming and it is not what you asked for.
+>
+> Don't `conda install` or `pip install` this tool into a conda env either.
+> Conda and pip each keep their own record of what's installed and neither sees
+> the other's, so they can overwrite each other's files — broken imports that
+> are painful to diagnose. An isolated installer sidesteps all of this.
 
-Install from the **`base`** environment, not from a project env you created for
-this. The tool keeps using whichever Python built it, and `base` only goes away
-if you uninstall conda — a project env is one `conda env remove` away from
-breaking the command.
+1. Open your terminal — plain **Terminal** on macOS, plain **PowerShell** on
+   Windows. No conda prompt needed: none of this touches conda.
 
-1. Open your terminal:
-   - **macOS** — **Terminal** (`Cmd+Space`, type `Terminal`, Enter).
-   - **Windows** — **Anaconda Prompt** (Windows key, type `Anaconda`, Enter).
-     Use this one, not plain PowerShell: it's where conda's `python` exists.
-
-2. Switch to the base environment — your prompt should now start with `(base)`:
-
-   ```bash
-   conda activate base
-   ```
-
-3. Install pipx:
+2. Install uv:
 
    ```bash
-   python -m pip install --user pipx
-   python -m pipx ensurepath
+   # macOS / Linux
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-4. **Restart your terminal completely** — `Cmd+Q` on macOS, close the window on
-   Windows. Easy to skip, but required: `ensurepath` changes your PATH and only
+   ```bash
+   # Windows
+   winget install --id=astral-sh.uv -e
+   ```
+
+3. **Restart your terminal completely** — `Cmd+Q` on macOS, close the window on
+   Windows. Easy to skip, but required: the installer changes your PATH and only
    a freshly opened terminal picks that up.
 
-5. Reopen the terminal and install the tool:
+4. Reopen it and install the tool:
 
    ```bash
-   conda activate base
-   pipx install git+https://github.com/clemmbn/auriga-extract.git
+   uv tool install git+https://github.com/clemmbn/auriga-extract.git
    ```
 
-6. Check it worked — try it in a terminal with **no** conda env active, it
-   should behave exactly the same:
+5. Check it worked — from any terminal, with or without a conda env active:
 
    ```bash
    auriga-extract --help
    ```
 
-**You never need `conda activate` to run the tool.** pipx put a launcher on your
-PATH that points straight at the tool's own environment, so `auriga-extract`
-works from any terminal, conda active or not.
+**You never need `conda activate` to run the tool**, and it keeps working if you
+remove a conda env or uninstall conda entirely. uv downloads its own Python for
+the tool; conda's is never involved.
 
-Two things worth knowing:
+To update later: `uv tool upgrade auriga-extract`. To remove it:
+`uv tool uninstall auriga-extract`.
 
-- **To update later:** `pipx upgrade auriga-extract`. If `pipx` isn't found
-  outside conda, run `conda activate base` first — pipx itself lives in conda's
-  Python, even though `auriga-extract` doesn't.
-- **If you ever uninstall conda**, reinstall the tool afterwards with the same
-  `pipx install` line: it was built from conda's Python and goes with it.
+**Prefer pipx?** Fine — just install pipx *with conda*, into an environment of
+its own, never with `pip --user`:
+
+```bash
+conda create -n tools -c conda-forge pipx
+conda activate tools
+pipx install git+https://github.com/clemmbn/auriga-extract.git
+```
+
+The launcher lands on your PATH the same way, so the tool still runs from any
+terminal. Only `pipx` itself needs `conda activate tools`, when you want to
+upgrade or uninstall.
+
+### Already ran `pip install --user pipx`?
+
+Your environments are fine — there is exactly **one** copy of those packages in
+that shared folder, not one per env, so a single uninstall cleans all of them.
+From any environment on that Python version:
+
+```bash
+python -m pip list --user
+```
+
+That prints the shared folder's contents, and nothing else. To clear it:
+
+```bash
+pipx uninstall auriga-extract
+python -m pip uninstall pipx argcomplete userpath filelock platformdirs colorama click
+```
+
+pip prints the paths it is about to delete before asking `y/n`. Check each one
+sits under the shared user folder above. If a path points inside an env
+(`.../envs/<name>/lib/...`), answer **`n`** for that package — `click` and
+`colorama` are common dependencies and may legitimately live there too. Then
+reinstall with uv as above.
 
 </details>
 
@@ -167,6 +198,9 @@ pipx install git+https://github.com/clemmbn/auriga-extract.git
 `auriga-extract` is now a command available from any directory.
 Already use [uv](https://docs.astral.sh/uv/)? Swap the last line for
 `uv tool install git+https://github.com/clemmbn/auriga-extract.git`.
+
+**Using conda? Don't run the lines above** — `pip --user` leaks into every conda
+environment on that Python version. Open **Using conda?** above instead.
 
 To work on the code instead, clone the repo and run `pipx install --editable .`
 inside it.
