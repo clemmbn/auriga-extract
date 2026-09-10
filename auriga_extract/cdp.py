@@ -369,6 +369,57 @@ def default_profile() -> Path:
     return Path.home() / ".config" / "auriga-extract" / "chrome-profile"
 
 
+# Purely regenerable Chrome/Chromium state: rendering caches, component-
+# updater downloads, and local metrics buffers. None of these hold anything
+# the portal login depends on (that's Default/Cookies, Default/Local Storage,
+# Default/Network -- deliberately left alone). Paths are relative to the
+# profile root; a leading "Default/" reaches into the profile's only
+# (default) Chrome profile.
+_PURGEABLE_PROFILE_PATHS = [
+    "BrowserMetrics",
+    "component_crx_cache",
+    "optimization_guide_model_store",
+    "WasmTtsEngine",
+    "Safe Browsing",
+    "OnDeviceHeadSuggestModel",
+    "GraphiteDawnCache",
+    "ActorSafetyLists",
+    "ZxcvbnData",
+    "CertificateRevocation",
+    "OptimizationHints",
+    "Subresource Filter",
+    "PKIMetadata",
+    "Crowd Deny",
+    "segmentation_platform",
+    "SafetyTips",
+    "OptimizationGuideModelsManifest",
+    "Default/Cache",
+    "Default/Code Cache",
+    "Default/GPUCache",
+    "Default/DawnWebGPUCache",
+    "Default/DawnGraphiteCache",
+]
+
+
+def purge_profile_caches(profile: Path) -> None:
+    """
+    Delete regenerable Chrome cache/telemetry directories from a profile.
+
+    profile: the persistent profile directory (see default_profile()).
+    Side effect: removes disk cache, component-updater downloads, and metrics
+    buffers under `profile`; every one of them is rebuilt on next launch, so
+    this only costs a slightly slower first paint next run, not the login.
+
+    Called after every run, not just ones needing a fresh login: BrowserMetrics
+    gets a new 4MB file on every single launch, warm or cold (measured: 6
+    launches -> 24MB, never reclaimed on its own since metrics reporting is
+    disabled and nothing consumes the old files), so without this it grows
+    without bound regardless of how often the SSO session itself expires.
+    """
+    for rel in _PURGEABLE_PROFILE_PATHS:
+        shutil.rmtree(profile / rel, ignore_errors=True)
+
+
 def find_chromium() -> str:
     """
     Locate a Chromium-family browser.
@@ -514,7 +565,22 @@ def _spawn(browser_path: str, port: int, profile: Path, url: str) -> subprocess.
                 "--restore-last-session",
                 "--no-first-run",
                 "--no-default-browser-check",
-                "--disable-features=Translate",
+                "--disable-features=Translate,OptimizationHints,OptimizationHintsFetching,"
+                "OptimizationTargetPrediction,OptimizationGuideModelDownloading",
+                # This profile only needs to hold session cookies. Left at Chrome's
+                # defaults, every fresh --user-data-dir independently downloads the
+                # component-updater suite (Safe Browsing lists, on-device ML models,
+                # a WASM TTS engine) -- 200MB+ of unrelated end-user features that
+                # measured out to over 20x the size of the actual cookie/session
+                # data (Default/) they were sitting next to.
+                "--disable-component-update",
+                "--disable-sync",
+                "--disable-background-networking",
+                # --metrics-recording-only is NOT what it sounds like: it skips the
+                # UMA consent dialog for automation but still writes local metrics
+                # logs. --disable-metrics is the flag that actually stops
+                # BrowserMetrics/ from growing.
+                "--disable-metrics",
                 url,
             ],
             **kwargs,

@@ -92,6 +92,65 @@ def test_spawn_requests_session_restore(monkeypatch, tmp_path):
     assert "--remote-debugging-port=9222" in captured["argv"]
 
 
+def test_spawn_disables_component_downloads(monkeypatch, tmp_path):
+    """
+    Without these flags, every fresh --user-data-dir independently downloads
+    Chrome's component-updater suite (Safe Browsing lists, on-device ML
+    models, a WASM TTS engine) -- measured at 200MB+ per profile, over 20x
+    the actual cookie/session data the profile exists to hold.
+    """
+    captured = {}
+
+    def fake_popen(argv, **kwargs):
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(cdp.subprocess, "Popen", fake_popen)
+    cdp._spawn("/bin/chrome", 9222, tmp_path / "profile", "https://example.test/#/planning")
+
+    assert "--disable-component-update" in captured["argv"]
+    assert "--disable-background-networking" in captured["argv"]
+    assert "--disable-metrics" in captured["argv"]
+
+
+def test_purge_profile_caches_removes_regenerable_dirs_only(tmp_path):
+    """
+    purge_profile_caches must delete rendering/metrics/component-updater
+    cruft but leave the actual login (cookies, local storage) untouched --
+    that distinction is the entire point of the function.
+    """
+    profile = tmp_path / "profile"
+    junk = [
+        "BrowserMetrics",
+        "component_crx_cache",
+        "optimization_guide_model_store",
+        "Default/Cache",
+        "Default/Code Cache",
+        "Default/GPUCache",
+    ]
+    keep = [
+        "Default/Cookies",
+        "Default/Local Storage",
+        "Default/Network",
+    ]
+    for rel in junk + keep:
+        d = profile / rel
+        d.mkdir(parents=True)
+        (d / "data").write_bytes(b"x")
+
+    cdp.purge_profile_caches(profile)
+
+    for rel in junk:
+        assert not (profile / rel).exists()
+    for rel in keep:
+        assert (profile / rel).exists()
+
+
+def test_purge_profile_caches_tolerates_missing_dirs(tmp_path):
+    """A profile that never grew some of these dirs must not raise."""
+    cdp.purge_profile_caches(tmp_path / "never-launched")
+
+
 def test_spawn_reports_a_bad_browser_path(monkeypatch, tmp_path):
     """A hand-typed --browser path must not surface as a raw OSError traceback."""
 

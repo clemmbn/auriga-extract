@@ -22,4 +22,4 @@ Package layout mirrors the pipeline stages so any one can be debugged alone:
 """
 
 # Single source of truth: pyproject.toml reads this via hatchling.
-__version__ = "1.0.0"
+__version__ = "1.1.0"

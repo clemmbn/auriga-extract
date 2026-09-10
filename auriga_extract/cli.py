@@ -30,7 +30,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .capture import CaptureSink, attach
-from .cdp import DEFAULT_PORT, BrowserSession, default_profile
+from .cdp import DEFAULT_PORT, BrowserSession, default_profile, purge_profile_caches
 from .console import console
 from .courses import group_courses
 from .fetch import fetch_interventions, wait_for_token
@@ -142,6 +142,15 @@ def run(
         # Closed before the picker: everything needed is in memory by now, and
         # a stale window would only invite confusion.
         session.close(keep_open=keep_browser)
+        # BrowserMetrics gets a new 4MB file every single launch regardless of
+        # whether login was fresh or warm (measured: 6 launches -> 24MB, never
+        # reclaimed on its own since metrics reporting is disabled and nothing
+        # ever consumes the old files). So this purge runs after every run, not
+        # just a fresh-login one. Skipped for an adopted browser (session.launched
+        # is False, that profile is not ours to prune) and when the browser is
+        # left open (keep_open leaves files that are still in use by that window).
+        if session.launched and not keep_browser:
+            purge_profile_caches(session.profile)
 
     if not interventions:
         console.print("\n[yellow]No events in that range -- nothing to export.[/]")
