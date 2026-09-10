@@ -1,6 +1,6 @@
 # auriga-extract
 
-<img width="1582" height="1035" alt="Capture d’écran 2026-09-10 à 09 15 58" src="https://github.com/user-attachments/assets/982f7e03-a042-4f3b-92f3-8556ac69f592" />
+<img width="1582" height="1035" alt="Capture d’écran 2026-09-10 à 09 20 07" src="https://github.com/user-attachments/assets/98b5bb5d-b3c3-4f8f-9691-181708d27aeb" />
 
 
 Exports your ISAE-SUPAERO timetable from the Auriga portal into one `.ics`
