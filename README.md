@@ -1,10 +1,9 @@
 # auriga-extract
 
-<img width="1582" height="1035" alt="Capture d’écran 2026-09-10 à 09 20 07" src="https://github.com/user-attachments/assets/98b5bb5d-b3c3-4f8f-9691-181708d27aeb" />
-
-
 Exports your ISAE-SUPAERO timetable from the Auriga portal into one `.ics`
 file you can import into Apple Calendar, Google Calendar, Outlook, etc.
+
+<img width="1582" height="1035" alt="Capture d’écran 2026-09-10 à 09 20 07" src="https://github.com/user-attachments/assets/98b5bb5d-b3c3-4f8f-9691-181708d27aeb" />
 
 It opens a real browser, waits for you to log in normally, then reads your
 schedule from the portal's own traffic. **Credentials are never stored or
